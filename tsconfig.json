@@ -1,0 +1,22 @@
+{
+    "compilerOptions": {
+        "outDir": "./dist",
+        "allowJs": true,
+        "checkJs": true,
+        "removeComments": false,
+        "declaration": true,
+        "declarationMap": true,
+        "declarationDir": "./dist",
+        "emitDeclarationOnly": false,
+        "allowSyntheticDefaultImports": true,
+        "strict": true,
+        "target": "ESNext",
+        "module": "NodeNext",
+        "moduleResolution": "NodeNext"
+    },
+    "include": [
+        "src/server", 
+        "src/proxy"
+    ],
+    "exclude": ["node_modules"]
+}
