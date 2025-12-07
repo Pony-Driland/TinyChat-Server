@@ -14,5 +14,6 @@
         "module": "NodeNext",
         "moduleResolution": "NodeNext"
     },
+    "include": [],
     "exclude": ["node_modules"]
 }
