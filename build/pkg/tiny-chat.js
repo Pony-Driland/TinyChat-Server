@@ -22,11 +22,11 @@ const selectedTarget = defaultTarget(userTarget ? userTarget.split('=')[1] : os.
 
 // Configurações
 const config = {
-    root: 'server/tiny-chat',
-    inputFile: 'server/tiny-chat/index.js',       // Arquivo principal de entrada
+    root: 'src/server',
+    inputFile: 'src/server/index.js',       // Arquivo principal de entrada
     outputDir: 'dist',                            // Diretório de saída
     nodeModulesDir: 'node_modules',               // Diretório de node_modules
-    babelSourceDir: 'server/tiny-chat',          // Diretório a ser transpile
+    babelSourceDir: 'src/server',          // Diretório a ser transpile
     targets: selectedTarget,                      // Alvo para Pkg
 };
 
