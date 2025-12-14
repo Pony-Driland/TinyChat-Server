@@ -139,16 +139,22 @@ export const sendRateLimit = (socketEmit) => {
 };
 
 // Rate limit editor
+/** @type {Map<string, TinyRateLimiter>} */
+const rateLimits = new Map();
 export const createRateLimit = (limitCountName = '', itemName = 'items', code = -1) => {
-  const cfg = { 
-    cleanupInterval: 1000,
-    maxIdle: getIniConfig('RATE_LIMIT_TIME'),
-    maxHits: getIniConfig(limitCountName) || 5
-  };
-  const rateLimit = new TinyRateLimiter(cfg);
-
   // Track the events for rate limiting
   return (socket, fn, isUnknown = false) => {
+    const cfg = { 
+      cleanupInterval: 1000,
+      maxIdle: getIniConfig('RATE_LIMIT_TIME'),
+      maxHits: getIniConfig(limitCountName) || 5
+    };
+
+    let rateLimit = rateLimits.get(limitCountName);
+    if (!rateLimit) {
+      rateLimit = new TinyRateLimiter(cfg);
+      rateLimits.set(limitCountName, rateLimit);
+    }
     
     /** @type {number} */
     const limitCount = cfg.maxHits;
@@ -162,7 +168,8 @@ export const createRateLimit = (limitCountName = '', itemName = 'items', code = 
     if (!userId) return false;
 
     // Check if rate limit is exceeded based on RATE_LIMIT_TIME
-    if (rateLimit.isRateLimited()) {
+    rateLimit.hit(userId);
+    if (rateLimit.isRateLimited(userId)) {
       const rateLimitTime = cfg.maxIdle / 1000;
       fn({
         error: true,
@@ -175,7 +182,6 @@ export const createRateLimit = (limitCountName = '', itemName = 'items', code = 
     }
 
     // Free user!
-    rateLimit.hit(userId);
     return false;
   };
 };
