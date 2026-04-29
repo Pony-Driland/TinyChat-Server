@@ -4906,10 +4906,10 @@ proxy-addr@^2.0.7:
     forwarded "0.2.0"
     ipaddr.js "1.9.1"
 
-puddysql@^1.0.0-beta-4:
-  version "1.0.0-beta-4"
-  resolved "https://registry.yarnpkg.com/puddysql/-/puddysql-1.0.0-beta-4.tgz#acd79c15f1e3e9fd622ac881b7c58cf7fabc39e3"
-  integrity sha512-va1gFmhNEFdltK/YidxkPgt1QqDnkRgCiO9yDqMhofz4UMqdHOKuEn24BtwO6PtG/wvHp88C2FJzYcBI/RN4vg==
+puddysql@^1.0.0-beta-6:
+  version "1.0.0-beta-6"
+  resolved "https://registry.yarnpkg.com/puddysql/-/puddysql-1.0.0-beta-6.tgz#28a20dd9a5ce4b1b47be5c48f695286800a19161"
+  integrity sha512-Gw9IRiVcgJoAG+sTgLvx+OyAW4lz2MShAgMoQZj7Cf1/WwKbleBTTlO6ikxmWmYX6ls0hBfciy05TQZbTO14wg==
   dependencies:
     "@types/lodash" "^4.17.19"
     "@types/pg" "^8.15.4"
@@ -4918,7 +4918,6 @@ puddysql@^1.0.0-beta-4:
     pg "^8.16.3"
     sqlite "^5.1.1"
     sqlite3 "^5.1.7"
-    tiny-essentials "^1.24.2"
 
 pump@^3.0.0:
   version "3.0.3"
@@ -5854,10 +5853,15 @@ timed-out@^4.0.1:
   resolved "https://registry.yarnpkg.com/timed-out/-/timed-out-4.0.1.tgz#f32eacac5a175bea25d7fab565ab3ed8741ef56f"
   integrity sha512-G7r3AhovYtr5YKOWQkta8RKAPb+J9IsO4uVmzjl8AZwfhs8UcUwTiD6gcJYSgOtzyjvQKrKYn41syHbUWMkafA==
 
-tiny-essentials@^1.24.2, tiny-essentials@^1.24.3, tiny-essentials@^1.24.5:
+tiny-essentials@^1.24.3:
   version "1.24.5"
   resolved "https://registry.yarnpkg.com/tiny-essentials/-/tiny-essentials-1.24.5.tgz#76132adf833a73655dc49eaded4b68bc4f15cffb"
   integrity sha512-exikhxkAoKv226kXf9ILToBuWnYajZR/QBCoxqreS/m5xjQbE0DpdyB9OSC/sy5FQrmEcuka/J309Y/sn2SRZg==
+
+tiny-essentials@^1.25.6:
+  version "1.25.6"
+  resolved "https://registry.yarnpkg.com/tiny-essentials/-/tiny-essentials-1.25.6.tgz#c89dae2f31692b84b6c1ecefb7ec66ae759fd744"
+  integrity sha512-DM1oYs3w5Ek8iOxn+nUHNfemKwprgmuCQQgBsPTadgMeHACajpIZX26rYpm105FY22uzzc5trlSD/WCOqtVvxQ==
 
 tiny-server-essentials@^1.1.0:
   version "1.1.0"
