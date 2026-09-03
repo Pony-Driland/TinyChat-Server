@@ -1,4 +1,4 @@
-import crypto from 'crypto';
+import { createHash } from 'crypto';
 import { isJsonObject } from 'tiny-essentials/basics/objChecker';
 import TinyPromiseQueue from 'tiny-essentials/libs/utils/TinyPromiseQueue';
 import TinyRateLimiter from 'tiny-essentials/libs/math/TinyRateLimiter';
@@ -22,7 +22,7 @@ export const _setIniConfig = (where, value) => {
 export const roomUsers = new Map(); // Stores room users
 
 // Hashed String
-export const getHashString = (text) => crypto.createHash('sha256').update(text).digest('hex');
+export const getHashString = (text) => createHash('sha256').update(text).digest('hex');
 
 // Map to Array
 export function mapToArray(map) {

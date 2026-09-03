@@ -1,4 +1,4 @@
-import path from 'path';
+import { join } from 'path';
 import PuddySql from 'puddysql';
 import isDebug from '../../api/isDebug';
 
@@ -12,7 +12,7 @@ export const startDatabase = async (appStorage) => {
 
     // Sqlite3
     if (config.database.type === 'sqlite3')
-      await db.initSqlite3(path.join(appDir(), `./database.db`));
+      await db.initSqlite3(join(appDir(), `./database.db`));
     // Postgre
     else if (config.database.type === 'postgre')
       await db.initPostgre({
