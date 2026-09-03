@@ -1,7 +1,7 @@
 import crypto from 'crypto';
-import { isJsonObject } from 'tiny-essentials/basics';
-import TinyPromiseQueue from 'tiny-essentials/libs/TinyPromiseQueue';
-import TinyRateLimiter from 'tiny-essentials/libs/TinyRateLimiter';
+import { isJsonObject } from 'tiny-essentials/basics/objChecker';
+import TinyPromiseQueue from 'tiny-essentials/libs/utils/TinyPromiseQueue';
+import TinyRateLimiter from 'tiny-essentials/libs/math/TinyRateLimiter';
 import db from './sql';
 const AsyncFunction = (async () => {}).constructor;
 export const roomQueue = new TinyPromiseQueue();

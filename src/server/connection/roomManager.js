@@ -1,4 +1,4 @@
-import { isJsonObject } from 'tiny-essentials/basics';
+import { isJsonObject } from 'tiny-essentials/basics/objChecker';
 import db from './sql';
 
 import {
