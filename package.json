@@ -1,5 +1,5 @@
 {
-    "name": "tiny-chat-server",
+    "name": "tiny-rpg-chat-server",
     "version": "1.0.0",
     "description": "Lightweight roleplay/RPG chat room server",
     "engines": {
