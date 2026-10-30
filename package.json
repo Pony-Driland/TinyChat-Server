@@ -1,11 +1,19 @@
 {
+    "name": "tiny-chat-server",
+    "version": "1.0.0",
+    "description": "Lightweight roleplay/RPG chat room server",
     "engines": {
         "node": ">=20.0.0"
+    },
+    "bin": {
+        "tiny-rpg-chat-archive": "./build/chat-archive-cli.js"
     },
     "scripts": {
         "start": "npx babel-node src/server/index.js",
         "start:proxy": "npx babel-node src/proxy/index.js",
         "build": "node build/pkg/tiny-chat.js",
+        "test": "node --test test/chat-archive-cli.test.mjs",
+        "test:watch": "node --test --watch test/chat-archive-cli.test.mjs",
         "chat:export": "node build/chat-archive-cli.js export",
         "chat:import": "node build/chat-archive-cli.js import",
         "chat:rooms": "node build/chat-archive-cli.js rooms",
@@ -14,7 +22,7 @@
     },
     "author": {
         "name": "JasminDreasond (Yasmin Seidel)",
-        "email": "tiny@puddy.club",
+        "email": "tiny@pony.house",
         "url": "https://github.com/JasminDreasond"
     },
     "dependencies": {

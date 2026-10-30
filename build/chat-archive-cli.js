@@ -36,6 +36,15 @@ const crypto = require('crypto');
 
 const ini = require('ini');
 
+// The version is only used for the banner, so a missing package.json (e.g. when
+// the file is copied around by itself) must not break the CLI.
+let pkg = { version: '0.0.0' };
+try {
+  pkg = require('../package.json');
+} catch (err) {
+  // ignore
+}
+
 // -----------------------------------------------------------------------------
 // Terminal helpers
 // -----------------------------------------------------------------------------
@@ -66,7 +75,7 @@ const log = {
 };
 
 const HELP = `
-${color.bold('Tiny Chat - Chat Archive CLI')} v1.0.0
+${color.bold('Tiny Chat - Chat Archive CLI')} v${pkg.version}
 
 ${color.bold('USAGE')}
   node build/chat-archive-cli.js <command> [options]
@@ -856,7 +865,7 @@ async function main() {
   const args = parseArgs(process.argv.slice(2));
 
   if (args.help) return console.log(HELP);
-  if (args.version) return console.log('1.0.0');
+  if (args.version) return console.log(pkg.version);
 
   const command = args._[0];
   if (!command) return console.log(HELP);
