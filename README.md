@@ -21,6 +21,19 @@ If your TinyChat server is running locally at home, you may use the built-in **p
 You can freely download the project and start testing it right away.
 Feedback, bug reports, and suggestions are welcome to help improve TinyChat during the beta cycle.
 
+## 📦 Chat Archive CLI
+
+Backup, migrate and edit your chat history from the terminal — export any room chapter to a
+plain JSON file and import it back, with interactive room/chapter selection.
+
+```bash
+./build/chat-archive-cli.js rooms
+./build/chat-archive-cli.js export --room lobby --chapter all --file lobby.json
+./build/chat-archive-cli.js import --room lobby --chapter 2 --file lobby.json
+```
+
+📖 **[Full documentation →](docs/chat-archive-cli.md)**
+
 ## 🧩 About the Project
 
 TinyChat was built to support:

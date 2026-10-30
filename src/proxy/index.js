@@ -1,5 +1,5 @@
 import path from 'path';
-import { isJsonObject } from 'tiny-essentials/basics';
+import { isJsonObject } from 'tiny-essentials/basics/objChecker';
 import SocketIoProxyServer from 'tiny-server-essentials/proxy/server';
 
 import { createAppDirectory, ensureIniFile, getIniBoolean } from '../api/ini';

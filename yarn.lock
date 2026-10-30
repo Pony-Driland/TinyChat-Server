@@ -3205,10 +3205,10 @@ fs-constants@^1.0.0:
   resolved "https://registry.yarnpkg.com/fs-constants/-/fs-constants-1.0.0.tgz#6be0de9be998ce16af8afc24497b9ee9b7ccd9ad"
   integrity sha512-y6OAwoSIf7FyjMIv94u+b5rdheZEjzR63GTyZJm5qh4Bi+2YgwLCcI/fPFZkL5PSixOt6ZNKm+w+Hfp/Bciwow==
 
-fs-extra@^11.3.1:
-  version "11.3.2"
-  resolved "https://registry.yarnpkg.com/fs-extra/-/fs-extra-11.3.2.tgz#c838aeddc6f4a8c74dd15f85e11fe5511bfe02a4"
-  integrity sha512-Xr9F6z6up6Ws+NjzMCZc6WXg2YFRlrLP9NQDO3VQrWrfiojdhS56TzueT88ze0uBdCTwEIhQ3ptnmKeWGFAe0A==
+fs-extra@^11.3.3:
+  version "11.3.3"
+  resolved "https://registry.yarnpkg.com/fs-extra/-/fs-extra-11.3.3.tgz#a27da23b72524e81ac6c3815cc0179b8c74c59ee"
+  integrity sha512-VWSRii4t0AFm6ixFFmLLx1t7wS1gh+ckoa84aOeapGum0h+EZd1EhEumSB+ZdDLnEPuucsVB9oB7cxJHap6Afg==
   dependencies:
     graceful-fs "^4.2.0"
     jsonfile "^6.0.1"
@@ -4906,10 +4906,10 @@ proxy-addr@^2.0.7:
     forwarded "0.2.0"
     ipaddr.js "1.9.1"
 
-puddysql@^1.0.0-beta-4:
-  version "1.0.0-beta-4"
-  resolved "https://registry.yarnpkg.com/puddysql/-/puddysql-1.0.0-beta-4.tgz#acd79c15f1e3e9fd622ac881b7c58cf7fabc39e3"
-  integrity sha512-va1gFmhNEFdltK/YidxkPgt1QqDnkRgCiO9yDqMhofz4UMqdHOKuEn24BtwO6PtG/wvHp88C2FJzYcBI/RN4vg==
+puddysql@^1.0.0-beta-9:
+  version "1.0.0-beta-9"
+  resolved "https://registry.yarnpkg.com/puddysql/-/puddysql-1.0.0-beta-9.tgz#6f242c00e1af1085a96e27d28ca161b7443e6a56"
+  integrity sha512-6JVgqNaCCyqwSMy1ahMQKtv7iZ2BZpljNu9+8dRvF6VM7ToeWq/WqyHflaLOmUs4q3J+vJZ1q77ETy1Bf5hCEg==
   dependencies:
     "@types/lodash" "^4.17.19"
     "@types/pg" "^8.15.4"
@@ -4918,7 +4918,6 @@ puddysql@^1.0.0-beta-4:
     pg "^8.16.3"
     sqlite "^5.1.1"
     sqlite3 "^5.1.7"
-    tiny-essentials "^1.24.2"
 
 pump@^3.0.0:
   version "3.0.3"
@@ -5854,10 +5853,15 @@ timed-out@^4.0.1:
   resolved "https://registry.yarnpkg.com/timed-out/-/timed-out-4.0.1.tgz#f32eacac5a175bea25d7fab565ab3ed8741ef56f"
   integrity sha512-G7r3AhovYtr5YKOWQkta8RKAPb+J9IsO4uVmzjl8AZwfhs8UcUwTiD6gcJYSgOtzyjvQKrKYn41syHbUWMkafA==
 
-tiny-essentials@^1.24.2, tiny-essentials@^1.24.3, tiny-essentials@^1.24.5:
+tiny-essentials@^1.24.3:
   version "1.24.5"
   resolved "https://registry.yarnpkg.com/tiny-essentials/-/tiny-essentials-1.24.5.tgz#76132adf833a73655dc49eaded4b68bc4f15cffb"
   integrity sha512-exikhxkAoKv226kXf9ILToBuWnYajZR/QBCoxqreS/m5xjQbE0DpdyB9OSC/sy5FQrmEcuka/J309Y/sn2SRZg==
+
+tiny-essentials@^1.28.19:
+  version "1.28.19"
+  resolved "https://registry.yarnpkg.com/tiny-essentials/-/tiny-essentials-1.28.19.tgz#f93b99acf81b83f3b75cbd44a22767afd5c37f7b"
+  integrity sha512-jOSNee78AwXjhLXZWsCX+TAHV/PTcjr6rKuDeJCPuwlB2QPczhZSuCtemZOCmEvNpOFU+oxSS5KmFFbldE+qZA==
 
 tiny-server-essentials@^1.1.0:
   version "1.1.0"
