@@ -1,5 +1,5 @@
-import fs from 'fs';
-import path from 'path';
+import { writeFileSync, existsSync, mkdirSync } from 'fs';
+import { join } from 'path';
 
 import { startDatabase } from './connection/sql';
 import { _setIniConfig } from './connection/values';
@@ -17,8 +17,8 @@ export default async function startFiles() {
     // Start ini file
     const config = {};
     const { newCfg, defaultCfg } = await ensureIniFile(
-      path.join(appDir, `./config.ini`),
-      path.join(__dirname, `./config.ini`),
+      join(appDir, `./config.ini`),
+      join(__dirname, `./config.ini`),
     );
 
     /**
@@ -67,7 +67,7 @@ export default async function startFiles() {
      * @param {object} [options] - Optional settings for file writing, such as encoding or mode.
      */
     appStorage.insertFileSync = (pathName, data, options) =>
-      fs.writeFileSync(path.join(appDir, pathName), data, options);
+      writeFileSync(join(appDir, pathName), data, options);
 
     /**
      * Function to create a directory inside a specific parent folder if it doesn't exist.
@@ -75,16 +75,16 @@ export default async function startFiles() {
      */
     appStorage.createDir = (newDirectory) => {
       // Check if the parent directory exists
-      if (!fs.existsSync(appDir)) {
+      if (!existsSync(appDir)) {
         console.error(`[ERROR] The parent directory does not exist: ${appDir}`);
         return;
       }
 
       // Full path of the new directory
-      const newDirPath = path.join(appDir, newDirectory);
+      const newDirPath = join(appDir, newDirectory);
 
       // Check if the new directory already exists
-      if (!fs.existsSync(newDirPath)) fs.mkdirSync(newDirPath);
+      if (!existsSync(newDirPath)) mkdirSync(newDirPath);
     };
 
     // Start database

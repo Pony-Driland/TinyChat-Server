@@ -1,4 +1,4 @@
-import { countObj, isJsonObject } from 'tiny-essentials/basics';
+import { countObj, isJsonObject } from 'tiny-essentials/basics/objChecker';
 import db from './sql';
 import {
   userMsgIsRateLimited,
