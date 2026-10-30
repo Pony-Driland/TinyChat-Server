@@ -111,8 +111,29 @@ The JSON is an **array of messages**:
 | `user` | `string` | ✅ | Author ID |
 | `chapter` | `number` | ➖ | Only used on import with `--chapter all` |
 | `isModel` | `boolean` | ➖ | Marks the message as AI generated |
+| `model` | `string` | ➖ | Model that produced the message |
+| `hash` | `string` | ➖ | Content hash stored by the server |
+| `edited` | `number` | ➖ | Last edit timestamp (`0` when never edited) |
+| `tokens` | `number` | ➖ | Token count reported by the model |
+| `errorCode` | `string` | ➖ | Error code when the generation failed |
 
 > **Tip:** the `id` field is what prevents duplicates. Keep it when editing the file by hand.
+
+### Optional metadata
+
+Every column of the `history` table that is not part of the core format (`model`, `hash`,
+`edited`, `tokens`, `errorCode` and `isModel`) is handled as **optional metadata**:
+
+- **Export** writes them whenever the database has a value for the row.
+- **Import** restores them when present and falls back to `NULL` otherwise.
+- **`--minimal`** disables both sides, producing/consuming only `message`, `time`, `id` and
+  `user` (plus `chapter` on import).
+
+```bash
+# Only the four core fields, both on export and on import
+tiny-rpg-chat-archive export -r lobby -c 1 -f lobby.json --minimal
+tiny-rpg-chat-archive import -r lobby -c 1 -f lobby.json --minimal
+```
 
 ---
 
@@ -168,6 +189,7 @@ tiny-rpg-chat-archive export [options]
 | `-c, --chapter <n\|all>` | Chapter or `all` (asks if omitted) |
 | `-f, --file <path>` | Output file (default: `chat-<room>-<chapter>.json`) |
 | `--compact` | JSON without indentation |
+| `--minimal` | Exports only `message`, `time`, `id` and `user` |
 | `--dry-run` | Only shows what would be done |
 
 ```bash
@@ -195,6 +217,7 @@ tiny-rpg-chat-archive import [options]
 | `-c, --chapter <n\|all>` | Target chapter. Accepts a new number |
 | `-m, --mode <mode>` | `merge` (default), `replace` or `upsert` |
 | `-y, --yes` | Do not ask for confirmation |
+| `--minimal` | Ignores the optional metadata columns in the file |
 | `--dry-run` | Validates and prints the summary without writing |
 
 ```bash
@@ -265,6 +288,7 @@ printf '1\nA\n' | tiny-rpg-chat-archive export
 |---|---|
 | `-d, --data-dir <path>` | Folder containing `config.ini` and `database.db` |
 | `--json` | Machine-readable output, no prompts |
+| `--minimal` | Only the four core fields (`message`, `time`, `id`, `user`) |
 | `--dry-run` | Writes nothing |
 | `-h, --help` | Help |
 | `-v, --version` | Version |

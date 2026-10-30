@@ -151,6 +151,7 @@ describe('export', () => {
       '1',
       '-f',
       file,
+      '--minimal',
     ]);
 
     assert.equal(code, 0);
@@ -164,6 +165,35 @@ describe('export', () => {
     );
     assert.equal(archive[0].user, 'admin');
     assert.equal(archive[0].time, 1000);
+  });
+
+  test('exports the optional metadata by default', async () => {
+    const file = jsonFile('metadata.json');
+    await runCli(['export', '-d', dataDir(), '-r', 'lobby', '-c', '1', '-f', file]);
+
+    const [entry] = readJson(file);
+    assert.equal(entry.edited, 0);
+    assert.equal(entry.isModel, undefined);
+  });
+
+  test('--minimal drops every optional column', async () => {
+    const file = jsonFile('minimal.json');
+    await runCli([
+      'export',
+      '-d',
+      dataDir(),
+      '-r',
+      'lobby',
+      '-c',
+      '1',
+      '-f',
+      file,
+      '--minimal',
+    ]);
+
+    const [entry] = readJson(file);
+    for (const key of ['model', 'hash', 'edited', 'tokens', 'errorCode', 'isModel'])
+      assert.equal(entry[key], undefined);
   });
 
   test('exports every chapter with -c all', async () => {
@@ -381,6 +411,36 @@ describe('import', () => {
     await runCli(['export', '-d', dataDir(), '-r', 'rpg', '-c', '9', '-f', again]);
 
     assert.deepEqual(readJson(again), readJson(exported));
+  });
+
+  test('round-trips the optional metadata', async () => {
+    const file = archive('metadata.json', [
+      {
+        message: 'with metadata',
+        time: 60000,
+        id: 'meta-a',
+        user: 'erin',
+        model: 'gpt-test',
+        hash: 'abc123',
+        edited: 1234,
+        tokens: 42,
+        errorCode: 'E_NONE',
+        isModel: true,
+      },
+    ]);
+
+    await runCli(['import', '-d', dataDir(), '-r', 'rpg', '-c', '16', '-f', file, '-y']);
+
+    const exported = jsonFile('metadata-out.json');
+    await runCli(['export', '-d', dataDir(), '-r', 'rpg', '-c', '16', '-f', exported]);
+
+    const [entry] = readJson(exported);
+    assert.equal(entry.model, 'gpt-test');
+    assert.equal(entry.hash, 'abc123');
+    assert.equal(entry.edited, 1234);
+    assert.equal(entry.tokens, 42);
+    assert.equal(entry.errorCode, 'E_NONE');
+    assert.equal(entry.isModel, true);
   });
 
   test('generates an id when the field is missing', async () => {

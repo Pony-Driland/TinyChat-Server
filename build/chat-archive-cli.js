@@ -16,6 +16,10 @@
  *     }
  *   ]
  *
+ * Every other column of the `history` table (model, hash, edited, tokens,
+ * errorCode and isModel) is exported as optional metadata and restored on
+ * import. Use --minimal to fall back to the four field format above.
+ *
  * The CLI is interactive: when a value is not provided through the flags it will
  * ask which room and which chapter should be used (including an "all chapters"
  * option on export).
@@ -93,6 +97,7 @@ ${color.bold('OPTIONS')}
   -f, --file <path>       JSON file to read (import) or write (export)
   -m, --mode <mode>       Import mode: merge | replace | upsert (default: merge)
   -y, --yes               Skip the confirmation prompt
+      --minimal           Export/import only message, time, id and user
       --pretty            Pretty-print the exported JSON (default: true)
       --compact           Export the JSON without indentation
       --dry-run           Show what would happen without writing anything
@@ -104,6 +109,11 @@ ${color.bold('IMPORT MODES')}
   merge     Insert new messages and skip the ones that already exist (default)
   replace   Delete the target chapter before inserting the file contents
   upsert    Insert new messages and update the ones that already exist
+
+${color.bold('OPTIONAL METADATA')}
+  By default the export also writes the optional history columns (model, hash,
+  edited, tokens, errorCode and isModel) and the import restores them. Use
+  --minimal to keep only message, time, id and user.
 
 ${color.bold('EXAMPLES')}
   # interactive: asks the room and the chapter
@@ -186,6 +196,9 @@ function parseArgs(argv) {
         break;
       case 'compact':
         args.pretty = false;
+        break;
+      case 'minimal':
+        args.minimal = true;
         break;
       case 'dry-run':
         args.dryRun = true;
@@ -440,7 +453,8 @@ const createRepository = (adapter) => ({
 
   async exportMessages(roomId, chapter) {
     const params = [roomId];
-    let sql = 'SELECT historyId, userId, text, date, chapter FROM history WHERE roomId = ?';
+    let sql =
+      'SELECT historyId, userId, text, date, chapter, model, hash, edited, tokens, errorCode, isModel FROM history WHERE roomId = ?';
     if (typeof chapter === 'number') {
       sql += ' AND chapter = ?';
       params.push(chapter);
@@ -460,7 +474,7 @@ const createRepository = (adapter) => ({
 
   async insertMessage(row) {
     return adapter.run(
-      'INSERT INTO history (historyId, roomId, userId, text, date, chapter, isModel, edited) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+      'INSERT INTO history (historyId, roomId, userId, text, date, chapter, model, hash, edited, tokens, errorCode, isModel) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
       [
         row.historyId,
         row.roomId,
@@ -468,16 +482,33 @@ const createRepository = (adapter) => ({
         row.text,
         row.date,
         row.chapter,
-        row.isModel ? 1 : 0,
+        row.model,
+        row.hash,
         row.edited,
+        row.tokens,
+        row.errorCode,
+        row.isModel ? 1 : 0,
       ],
     );
   },
 
   async updateMessage(row) {
     return adapter.run(
-      'UPDATE history SET userId = ?, text = ?, date = ?, chapter = ?, isModel = ? WHERE roomId = ? AND historyId = ?',
-      [row.userId, row.text, row.date, row.chapter, row.isModel ? 1 : 0, row.roomId, row.historyId],
+      'UPDATE history SET userId = ?, text = ?, date = ?, chapter = ?, model = ?, hash = ?, edited = ?, tokens = ?, errorCode = ?, isModel = ? WHERE roomId = ? AND historyId = ?',
+      [
+        row.userId,
+        row.text,
+        row.date,
+        row.chapter,
+        row.model,
+        row.hash,
+        row.edited,
+        row.tokens,
+        row.errorCode,
+        row.isModel ? 1 : 0,
+        row.roomId,
+        row.historyId,
+      ],
     );
   },
 });
@@ -488,19 +519,50 @@ const createRepository = (adapter) => ({
 
 const randomId = () => crypto.randomBytes(16).toString('hex');
 
-const toArchiveEntry = (row) => ({
-  message: String(row.text ?? ''),
-  time: Number(row.date) || 0,
-  id: String(row.historyId),
-  user: String(row.userId),
-});
+/**
+ * Converts a `history` row into an archive entry.
+ *
+ * The optional columns (model, hash, edited, tokens, errorCode and isModel) are
+ * only written when they actually hold a value, so a database that never used
+ * them keeps producing the short format. `minimal` drops them entirely.
+ *
+ * @param {any} row
+ * @param {{ minimal?: boolean }} [options]
+ */
+const toArchiveEntry = (row, options = {}) => {
+  const entry = {
+    message: String(row.text ?? ''),
+    time: Number(row.date) || 0,
+    id: String(row.historyId),
+    user: String(row.userId),
+  };
+
+  if (options.minimal) return entry;
+
+  if (row.model !== null && typeof row.model !== 'undefined') entry.model = String(row.model);
+  if (row.hash !== null && typeof row.hash !== 'undefined') entry.hash = String(row.hash);
+  if (row.edited !== null && typeof row.edited !== 'undefined')
+    entry.edited = Number(row.edited) || 0;
+  if (row.tokens !== null && typeof row.tokens !== 'undefined')
+    entry.tokens = Number(row.tokens) || 0;
+  if (row.errorCode !== null && typeof row.errorCode !== 'undefined')
+    entry.errorCode = String(row.errorCode);
+  if (row.isModel === true || row.isModel === 1) entry.isModel = true;
+
+  return entry;
+};
 
 /**
  * Validates and normalizes the JSON file content.
+ *
+ * The optional metadata is only read when `minimal` is false, which keeps the
+ * `--minimal` mode from ever touching those columns.
+ *
  * @param {unknown} payload
- * @returns {{ entries: Array<{ message: string, time: number, id: string, user: string, chapter?: number, isModel: boolean }>, errors: string[] }}
+ * @param {{ minimal?: boolean }} [options]
+ * @returns {{ entries: Array<{ message: string, time: number, id: string, user: string, chapter?: number, isModel: boolean, model?: string, hash?: string, edited?: number, tokens?: number, errorCode?: string }>, errors: string[] }}
  */
-function normalizeArchive(payload) {
+function normalizeArchive(payload, options = {}) {
   const errors = [];
 
   if (!Array.isArray(payload)) throw new Error('The JSON root must be an array of messages.');
@@ -515,7 +577,8 @@ function normalizeArchive(payload) {
       return;
     }
 
-    const { message, time, id, user, chapter, isModel } = /** @type {any} */ (item);
+    const { message, time, id, user, chapter, isModel, model, hash, edited, tokens, errorCode } =
+      /** @type {any} */ (item);
 
     if (typeof message !== 'string') {
       errors.push(`${position} has an invalid "message" (string expected).`);
@@ -533,15 +596,28 @@ function normalizeArchive(payload) {
       return;
     }
 
-    entries.push({
+    /** @type {any} */
+    const entry = {
       message,
       time: parsedTime,
       id: typeof id === 'string' && id.trim() !== '' ? id : randomId(),
       user,
       chapter:
         Number.isFinite(Number(chapter)) && Number(chapter) > 0 ? Number(chapter) : undefined,
-      isModel: isModel === true || isModel === 1,
-    });
+    };
+
+    if (!options.minimal) {
+      if (typeof model === 'string') entry.model = model;
+      if (typeof hash === 'string') entry.hash = hash;
+      if (Number.isFinite(Number(edited)) && edited !== null && edited !== '')
+        entry.edited = Number(edited);
+      if (Number.isFinite(Number(tokens)) && tokens !== null && tokens !== '')
+        entry.tokens = Number(tokens);
+      if (typeof errorCode === 'string') entry.errorCode = errorCode;
+      entry.isModel = isModel === true || isModel === 1;
+    }
+
+    entries.push(entry);
   });
 
   return { entries, errors };
@@ -705,7 +781,7 @@ async function commandExport(repository, prompt, args) {
     return;
   }
 
-  const archive = rows.map(toArchiveEntry);
+  const archive = rows.map((row) => toArchiveEntry(row, { minimal: args.minimal }));
   const chapterLabel = chapter === 'all' ? 'all' : `chapter-${chapter}`;
   const defaultFile = `chat-${room.roomId}-${chapterLabel}.json`;
   const outputFile = path.resolve(args.file || defaultFile);
@@ -755,7 +831,7 @@ async function commandImport(repository, prompt, args) {
     throw new Error(`The file is not a valid JSON: ${err.message}`);
   }
 
-  const { entries, errors } = normalizeArchive(parsed);
+  const { entries, errors } = normalizeArchive(parsed, { minimal: args.minimal });
 
   if (errors.length > 0) {
     errors.slice(0, 20).forEach((message) => log.error(message));
@@ -787,7 +863,11 @@ async function commandImport(repository, prompt, args) {
     date: entry.time,
     chapter: chapter === 'all' ? entry.chapter || 1 : chapter,
     isModel: entry.isModel,
-    edited: 0,
+    edited: typeof entry.edited === 'number' ? entry.edited : 0,
+    model: typeof entry.model === 'string' ? entry.model : null,
+    hash: typeof entry.hash === 'string' ? entry.hash : null,
+    tokens: typeof entry.tokens === 'number' ? entry.tokens : null,
+    errorCode: typeof entry.errorCode === 'string' ? entry.errorCode : null,
   }));
 
   const toInsert = [];
