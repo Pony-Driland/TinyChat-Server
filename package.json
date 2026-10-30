@@ -6,6 +6,10 @@
         "start": "npx babel-node src/server/index.js",
         "start:proxy": "npx babel-node src/proxy/index.js",
         "build": "node build/pkg/tiny-chat.js",
+        "chat:export": "node build/chat-archive-cli.js export",
+        "chat:import": "node build/chat-archive-cli.js import",
+        "chat:rooms": "node build/chat-archive-cli.js rooms",
+        "chat:chapters": "node build/chat-archive-cli.js chapters",
         "prettier": "prettier --write ./src/api/* && prettier --write ./src/proxy/* && prettier --write ./build/* && prettier --write ./temp/*"
     },
     "author": {
