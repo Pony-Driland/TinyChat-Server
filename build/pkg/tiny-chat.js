@@ -1,5 +1,6 @@
-const { execFileSync, execSync } = require('child_process');
+const { execSync, spawnSync } = require('child_process');
 const path = require('path');
+const { parseArgs } = require('node:util');
 const { compile } = require('nexe');
 const fs = require('fs-extra');
 
@@ -12,118 +13,173 @@ const config = {
   babelSourceDir3: 'src/api',
 };
 
+const PYTHON_CANDIDATES =
+  process.platform === 'win32' ? ['python', 'python3'] : ['python3', 'python'];
+
+const USAGE = [
+  'Usage: yarn build [options]',
+  '',
+  'Options:',
+  '  -p, --python <path>  Python 3 interpreter used by nexe (default: auto-detect)',
+  '  -h, --help           Show this help',
+  '',
+  'Environment:',
+  '  PYTHON               Same as --python, used when the flag is omitted',
+].join('\n');
+
+/**
+ * @typedef {Object} CliOptions
+ * @property {string|undefined} python Value passed with --python.
+ * @property {boolean} help True when --help was requested.
+ */
+
 /**
  * @typedef {Object} PythonInterpreter
- * @property {string} command Absolute path of the interpreter executable.
- * @property {string} version Raw output of `<command> --version`.
+ * @property {string} command Absolute path of the interpreter.
+ * @property {string} version Raw version output, e.g. `Python 3.12.4`.
  */
+
+/**
+ * Parses the build script arguments.
+ *
+ * @param {string[]} argv Arguments without the node/script prefix.
+ * @returns {CliOptions} Parsed options.
+ * @throws {TypeError} If `argv` is not an array or contains an unknown option.
+ */
+const parseCli = (argv) => {
+  if (!Array.isArray(argv)) {
+    throw new TypeError('argv must be an array of strings.');
+  }
+
+  let values;
+
+  try {
+    ({ values } = parseArgs({
+      args: argv,
+      options: {
+        python: { type: 'string', short: 'p' },
+        help: { type: 'boolean', short: 'h', default: false },
+      },
+      allowPositionals: false,
+      strict: true,
+    }));
+  } catch (error) {
+    throw new TypeError(`${error.message}\n\n${USAGE}`);
+  }
+
+  if (values.python !== undefined && values.python.trim().length === 0) {
+    throw new TypeError(`--python requires a path.\n\n${USAGE}`);
+  }
+
+  return { python: values.python, help: values.help };
+};
 
 /**
  * Checks whether a path points to an executable file.
  *
  * @param {string} filePath Absolute path to check.
- * @returns {boolean} True when the path exists and is executable.
+ * @returns {boolean} True when the path is a file and is executable.
  */
-const isExecutable = (filePath) => {
+const isExecutableFile = (filePath) => {
   try {
-    return fs.statSync(filePath).isFile() && (fs.accessSync(filePath, fs.constants.X_OK), true);
+    if (!fs.statSync(filePath).isFile()) return false;
+    fs.accessSync(filePath, fs.constants.X_OK);
+    return true;
   } catch {
     return false;
   }
 };
 
 /**
- * Searches an executable name inside the current PATH.
+ * Searches an executable inside the current PATH.
  *
  * @param {string} executable Executable name, e.g. `python3`.
  * @returns {string|null} Absolute path of the executable, or null when not found.
- * @throws {TypeError} If `executable` is not a non-empty string.
  */
 const findInPath = (executable) => {
-  if (typeof executable !== 'string' || executable.length === 0) {
-    throw new TypeError('executable must be a non-empty string.');
-  }
+  const platformExtensions =
+    process.platform === 'win32'
+      ? (process.env.PATHEXT || '.EXE;.CMD;.BAT').split(';').filter(Boolean)
+      : [''];
 
+  const extensions = path.extname(executable) ? [''] : platformExtensions;
   const directories = (process.env.PATH || '').split(path.delimiter).filter(Boolean);
 
   for (const directory of directories) {
-    const candidate = path.join(directory, executable);
-    if (isExecutable(candidate)) return candidate;
+    for (const extension of extensions) {
+      const candidate = path.join(directory, `${executable}${extension}`);
+      if (isExecutableFile(candidate)) return candidate;
+    }
   }
 
   return null;
 };
 
 /**
- * Runs `<command> --version` and returns the raw output.
+ * Validates a Python interpreter and reads its version.
  *
- * @param {string} command Absolute path of a Python interpreter.
- * @returns {string} Raw version string, e.g. `Python 3.12.4`.
- * @throws {TypeError} If `command` is not a non-empty string.
+ * @param {string} command Absolute path of the interpreter.
+ * @returns {PythonInterpreter} The interpreter and its raw version string.
  * @throws {Error} If the interpreter cannot be executed.
+ * @throws {RangeError} If the interpreter is not Python 3 or newer.
  */
-const readPythonVersion = (command) => {
-  if (typeof command !== 'string' || command.length === 0) {
-    throw new TypeError('command must be a non-empty string.');
+const validatePython = (command) => {
+  const { status, stdout, stderr } = spawnSync(command, ['--version'], { encoding: 'utf8' });
+
+  if (status !== 0) {
+    throw new Error(`"${command} --version" exited with code ${status}.`);
   }
 
-  try {
-    return execFileSync(command, ['--version'], { encoding: 'utf8' }).trim();
-  } catch (error) {
-    throw new Error(`Failed to run "${command} --version": ${error.message}`);
-  }
-};
+  const version = `${stdout || ''}${stderr || ''}`.trim();
+  const match = /^Python (\d+)\.\d+\.\d+/.exec(version);
 
-/**
- * Resolves the Python 3 interpreter used by nexe to run `configure.py`.
- *
- * Resolution order:
- * 1. `PYTHON` environment variable.
- * 2. `npm_config_python` (set by `npm config set python <path>`).
- * 3. The first candidate found in `PATH`.
- *
- * @param {string[]} [candidates] Executable names probed in order.
- * @returns {PythonInterpreter} Resolved interpreter and its version string.
- * @throws {TypeError} If `candidates` is not a non-empty array of non-empty strings.
- * @throws {Error} If no interpreter is found.
- * @throws {RangeError} If the resolved interpreter is not Python 3.
- */
-const resolvePython = (candidates = ['python3', 'python']) => {
-  if (!Array.isArray(candidates) || candidates.length === 0) {
-    throw new TypeError('candidates must be a non-empty array of strings.');
+  if (!match) {
+    throw new Error(`Unable to read the version of "${command}". Output: "${version}".`);
   }
 
-  const explicit = process.env.PYTHON || process.env.npm_config_python;
-  const found = [];
-
-  if (explicit) {
-    if (!isExecutable(explicit)) {
-      throw new Error(`"${explicit}" is not an executable file.`);
-    }
-    found.push(explicit);
-  } else {
-    for (const candidate of candidates) {
-      if (typeof candidate !== 'string' || candidate.length === 0) {
-        throw new TypeError('Every candidate must be a non-empty string.');
-      }
-
-      const resolved = findInPath(candidate);
-      if (resolved) found.push(resolved);
-    }
-  }
-
-  if (found.length === 0) {
-    throw new Error(`No Python interpreter found. Looked for: ${candidates.join(', ')}.`);
-  }
-
-  const [command] = found;
-  const version = readPythonVersion(command);
-
-  if (!version.startsWith('Python 3.')) {
-    throw new RangeError(`Nexe requires Python 3, but "${command}" reported "${version}".`);
+  if (Number(match[1]) < 3) {
+    throw new RangeError(`nexe requires Python 3, but "${command}" is ${version}.`);
   }
 
   return { command, version };
+};
+
+/**
+ * Resolves which Python interpreter nexe must use.
+ *
+ * @param {string|undefined} explicitPath Value received from --python.
+ * @returns {PythonInterpreter} The resolved interpreter.
+ * @throws {TypeError} If `explicitPath` is not a string or undefined.
+ * @throws {Error} If the interpreter cannot be found or is not executable.
+ */
+const resolvePython = (explicitPath) => {
+  if (explicitPath !== undefined && typeof explicitPath !== 'string') {
+    throw new TypeError('explicitPath must be a string or undefined.');
+  }
+
+  const requested = explicitPath ?? process.env.PYTHON ?? process.env.npm_config_python;
+
+  if (requested) {
+    const looksLikePath = requested.includes('/') || requested.includes(path.sep);
+    const fromPath = looksLikePath ? null : findInPath(requested);
+    const command = fromPath ?? path.resolve(requested);
+
+    if (!isExecutableFile(command)) {
+      throw new Error(`Python interpreter not found or not executable: "${requested}".`);
+    }
+
+    return validatePython(command);
+  }
+
+  for (const candidate of PYTHON_CANDIDATES) {
+    const command = findInPath(candidate);
+    if (command) return validatePython(command);
+  }
+
+  throw new Error(
+    `No Python interpreter found. Tried: ${PYTHON_CANDIDATES.join(', ')}. ` +
+      'Pass one explicitly with --python <path>.',
+  );
 };
 
 const clearDistFolder = () => {
@@ -168,12 +224,27 @@ const copySqlite3Modules = () => {
 // ----------------------
 // Nexe package
 // ----------------------
-const packageWithNexe = async () => {
-  console.log(`📦 Packaging with nexe...`);
 
-  const python = resolvePython();
-  process.env.PYTHON = python.command;
+/**
+ * Packages both binaries with nexe.
+ *
+ * @param {PythonInterpreter} python Interpreter resolved by {@link resolvePython}.
+ * @returns {Promise<void>} Resolves when both binaries are written.
+ * @throws {TypeError} If `python` is not a valid {@link PythonInterpreter}.
+ */
+const packageWithNexe = async (python) => {
+  if (typeof python !== 'object' || python === null) {
+    throw new TypeError('python must be a PythonInterpreter object.');
+  }
+
+  if (typeof python.command !== 'string' || python.command.length === 0) {
+    throw new TypeError('python.command must be a non-empty string.');
+  }
+
+  console.log(`📦 Packaging with nexe...`);
   console.log(`🐍 Python: ${python.command} (${python.version})`);
+
+  process.env.PYTHON = python.command;
 
   const rootFolder = path.join(__dirname, '../../');
 
@@ -210,16 +281,26 @@ const packageWithNexe = async () => {
 // Build main
 // ----------------------
 const buildApp = async () => {
+  const options = parseCli(process.argv.slice(2));
+
+  if (options.help) {
+    console.log(USAGE);
+    return;
+  }
+
+  const python = resolvePython(options.python);
+
   console.log('🎯 Build Information:');
   console.log(`   - Dist Directory: ${config.outputDirName}`);
   console.log(`   - Output Directory: ${config.outputDir}`);
   console.log(`   - Server Directory: ${config.babelSourceDir}`);
   console.log(`   - Proxy Directory: ${config.babelSourceDir2}`);
   console.log(`   - API Directory: ${config.babelSourceDir3}`);
+  console.log(`   - Python: ${python.command}`);
 
   clearDistFolder();
   transpileWithBabel();
-  await packageWithNexe();
+  await packageWithNexe(python);
 
   // Copy sqlite3 after building
   copySqlite3Modules();
@@ -227,4 +308,7 @@ const buildApp = async () => {
   console.log('🚀 Build completed successfully!');
 };
 
-buildApp();
+buildApp().catch((error) => {
+  console.error(`\n❌ ${error.message}`);
+  process.exitCode = 1;
+});
