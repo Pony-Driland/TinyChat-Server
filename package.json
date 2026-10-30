@@ -6,7 +6,7 @@
         "start": "npx babel-node src/server/index.js",
         "start:proxy": "npx babel-node src/proxy/index.js",
         "build": "node build/pkg/tiny-chat.js",
-        "fix:prettier": "prettier --write ./src/api/* && prettier --write ./src/proxy/* && prettier --write ./build/* && prettier --write ./temp/*"
+        "prettier": "prettier --write ./src/api/* && prettier --write ./src/proxy/* && prettier --write ./build/* && prettier --write ./temp/*"
     },
     "author": {
         "name": "JasminDreasond (Yasmin Seidel)",
@@ -17,7 +17,7 @@
         "buffer": "^6.0.3",
         "events": "^3.3.0",
         "ini": "^5.0.0",
-        "puddysql": "^1.0.0-beta-6",
+        "puddysql": "^1.0.0-beta-9",
         "socket.io": "^4.8.1",
         "socket.io-client": "^4.8.1",
         "tiny-essentials": "^1.28.19",

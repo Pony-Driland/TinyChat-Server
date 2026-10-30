@@ -4906,10 +4906,10 @@ proxy-addr@^2.0.7:
     forwarded "0.2.0"
     ipaddr.js "1.9.1"
 
-puddysql@^1.0.0-beta-6:
-  version "1.0.0-beta-6"
-  resolved "https://registry.yarnpkg.com/puddysql/-/puddysql-1.0.0-beta-6.tgz#28a20dd9a5ce4b1b47be5c48f695286800a19161"
-  integrity sha512-Gw9IRiVcgJoAG+sTgLvx+OyAW4lz2MShAgMoQZj7Cf1/WwKbleBTTlO6ikxmWmYX6ls0hBfciy05TQZbTO14wg==
+puddysql@^1.0.0-beta-9:
+  version "1.0.0-beta-9"
+  resolved "https://registry.yarnpkg.com/puddysql/-/puddysql-1.0.0-beta-9.tgz#6f242c00e1af1085a96e27d28ca161b7443e6a56"
+  integrity sha512-6JVgqNaCCyqwSMy1ahMQKtv7iZ2BZpljNu9+8dRvF6VM7ToeWq/WqyHflaLOmUs4q3J+vJZ1q77ETy1Bf5hCEg==
   dependencies:
     "@types/lodash" "^4.17.19"
     "@types/pg" "^8.15.4"
