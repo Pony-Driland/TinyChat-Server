@@ -193,14 +193,28 @@ const clearDistFolder = () => {
 // ----------------------
 const transpileWithBabel = () => {
   console.log('🔨 Transpiling code with Babel...');
+  
+  const env = { ...process.env };
+  Object.keys(env).forEach((key) => {
+    if (key.startsWith('npm_config_version_') || key === 'npm_config_argv') {
+      delete env[key];
+    }
+  });
+
+  const options = { stdio: 'inherit', env };
+  const babel = './node_modules/.bin/babel';
+
   execSync(
-    `npx babel ${config.babelSourceDir} --out-dir ${config.outputDir}/${config.babelSourceDir} --copy-files`,
+    `${babel} ${config.babelSourceDir} --out-dir ${config.outputDir}/${config.babelSourceDir} --copy-files`,
+    options
   );
   execSync(
-    `npx babel ${config.babelSourceDir2} --out-dir ${config.outputDir}/${config.babelSourceDir2} --copy-files`,
+    `${babel} ${config.babelSourceDir2} --out-dir ${config.outputDir}/${config.babelSourceDir2} --copy-files`,
+    options
   );
   execSync(
-    `npx babel ${config.babelSourceDir3} --out-dir ${config.outputDir}/${config.babelSourceDir3} --copy-files`,
+    `${babel} ${config.babelSourceDir3} --out-dir ${config.outputDir}/${config.babelSourceDir3} --copy-files`,
+    options
   );
 };
 
