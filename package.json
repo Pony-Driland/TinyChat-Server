@@ -11,7 +11,6 @@
     "scripts": {
         "start": "npx babel-node src/server/index.js",
         "start:proxy": "npx babel-node src/proxy/index.js",
-        "build": "node build/pkg/tiny-chat.js",
         "test": "node --test test/chat-archive-cli.test.mjs",
         "test:watch": "node --test --watch test/chat-archive-cli.test.mjs",
         "chat:export": "node build/chat-archive-cli.js export",
