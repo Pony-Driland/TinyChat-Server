@@ -12,23 +12,14 @@ const config = {
   babelSourceDir2: 'src/proxy',
   babelSourceDir3: 'src/api',
   sourceFolderName: 'src',
+  stagingDir: '.nexe-build', // Transient folder, never shipped.
 };
 
-/**
- * Folder that receives the packaged binaries and the transpiled sources.
- * Forward slashes are mandatory: the value is injected into a shell command.
- *
- * @type {string}
- */
+const projectRoot = path.resolve(__dirname, '../../');
 const buildOutputDir = `${config.outputDir}/${config.outputDirName}`;
-
-/**
- * Folder that receives the transpiled sources.
- * It lives inside the build folder so the executable resolves `./src/**` at runtime.
- *
- * @type {string}
- */
-const transpiledDir = `${buildOutputDir}/${config.sourceFolderName}`;
+const buildOutputPath = path.join(projectRoot, buildOutputDir);
+const stagingPath = path.join(projectRoot, config.stagingDir);
+const stagingSrcPath = path.join(stagingPath, config.sourceFolderName);
 
 const PYTHON_CANDIDATES =
   process.platform === 'win32' ? ['python', 'python3'] : ['python3', 'python'];
@@ -200,9 +191,15 @@ const resolvePython = (explicitPath) => {
 };
 
 const clearDistFolder = () => {
-  const distPath = path.resolve(config.outputDir);
   console.log('🧹 Clearing dist folder before build...');
-  fs.emptyDirSync(distPath);
+  fs.emptyDirSync(buildOutputPath);
+  fs.emptyDirSync(stagingPath);
+};
+
+const cleanupStaging = () => {
+  if (fs.existsSync(stagingPath)) {
+    fs.removeSync(stagingPath);
+  }
 };
 
 // ----------------------
@@ -218,13 +215,43 @@ const transpileWithBabel = () => {
     }
   });
 
-  const options = { stdio: 'inherit', env };
-  const babel = './node_modules/.bin/babel';
+  const options = { stdio: 'inherit', env, cwd: projectRoot };
+  const babel = path.join(projectRoot, 'node_modules', '.bin', 'babel');
 
   const sourceDirs = [config.babelSourceDir, config.babelSourceDir2, config.babelSourceDir3];
 
   for (const sourceDir of sourceDirs) {
-    execSync(`${babel} ${sourceDir} --out-dir ${buildOutputDir}/${sourceDir} --copy-files`, options);
+    const outDir = path.join(stagingPath, sourceDir);
+    execSync(`"${babel}" "${sourceDir}" --out-dir "${outDir}" --copy-files`, options);
+  }
+};
+
+/**
+ * Copies the editable .ini templates next to the binary.
+ *
+ * Templates are intentionally kept outside the bundle: the end user must be
+ * able to edit them without rebuilding the executable.
+ *
+ * @returns {void}
+ * @throws {Error} If a declared template does not exist in the repository.
+ */
+const copyConfigTemplates = () => {
+  console.log('📄 Copying .ini templates next to the binary...');
+
+  /** @type {Array<{ source: string, target: string }>} */
+  const templates = [
+    {
+      source: path.join(projectRoot, 'src', 'server', 'config.ini'),
+      target: path.join(buildOutputPath, 'config.ini'),
+    },
+  ];
+
+  for (const { source, target } of templates) {
+    if (!fs.existsSync(source)) {
+      throw new Error(`Missing config template: ${source}`);
+    }
+
+    fs.copySync(source, target);
   }
 };
 
@@ -232,8 +259,8 @@ const transpileWithBabel = () => {
 // Copy sqlite3 only
 // ----------------------
 const copySqlite3Modules = () => {
-  const sourceDir = path.resolve('node_modules/sqlite3');
-  const destDir = path.resolve(buildOutputDir, 'node_modules/sqlite3');
+  const sourceDir = path.join(projectRoot, 'node_modules', 'sqlite3');
+  const destDir = path.join(buildOutputPath, 'node_modules', 'sqlite3');
 
   if (!fs.existsSync(sourceDir)) {
     console.log('⚠️ sqlite3 not found in node_modules.');
@@ -274,16 +301,10 @@ const packageWithNexe = async (python) => {
 
   process.env.PYTHON = python.command;
 
-    const rootFolder = path.join(__dirname, '../../');
-  const sourceRoot = path.join(rootFolder, buildOutputDir, config.sourceFolderName);
-
   const cfgBase = {
     name: 'Tiny Roleplay Server Chat',
     python: python.command,
-    // resourceRoot must be the project root so the glob below produces the
-    // exact same path the application requests at runtime.
-    resourceRoot: rootFolder,
-    resources: [`${buildOutputDir}/${config.sourceFolderName}/**/*.ini`],
+    resourceRoot: projectRoot,
     rc: {
       CompanyName: 'JasminDreasond',
       ProductName: 'Tiny Roleplay Server Chat',
@@ -297,14 +318,14 @@ const packageWithNexe = async (python) => {
 
   await compile({
     ...cfgBase,
-    input: path.join(sourceRoot, 'server/index.js'),
-    output: path.join(rootFolder, `./${buildOutputDir}/tiny-chat`),
+    input: path.join(stagingSrcPath, 'server', 'index.js'),
+    output: path.join(buildOutputPath, 'tiny-chat'),
   });
 
   await compile({
     ...cfgBase,
-    input: path.join(sourceRoot, 'proxy/index.js'),
-    output: path.join(rootFolder, `./${buildOutputDir}/tiny-chat-proxy`),
+    input: path.join(stagingSrcPath, 'proxy', 'index.js'),
+    output: path.join(buildOutputPath, 'tiny-chat-proxy'),
   });
 };
 
@@ -331,15 +352,20 @@ const buildApp = async () => {
 
   clearDistFolder();
   transpileWithBabel();
+  copyConfigTemplates();
   await packageWithNexe(python);
-
-  // Copy sqlite3 after building
   copySqlite3Modules();
+  cleanupStaging();
 
   console.log('🚀 Build completed successfully!');
 };
 
 buildApp().catch((error) => {
   console.error(`\n❌ ${error.message}`);
+  try {
+    cleanupStaging();
+  } catch {
+    /* ignore cleanup errors */
+  }
   process.exitCode = 1;
 });

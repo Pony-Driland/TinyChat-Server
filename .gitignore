@@ -12,6 +12,8 @@ lerna-debug.log*
 /build/base64/*.webm
 /build/base64/*.txt
 
+.nexe-build
+
 *.kra~
 *-autosave.kra
 /temp/*

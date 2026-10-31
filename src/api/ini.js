@@ -5,6 +5,32 @@ import ini from 'ini';
 import isDebug from './isDebug';
 
 /**
+ * Resolves a file that ships next to the executable.
+ *
+ * A packaged binary (nexe/pkg) bakes the build machine path into `__dirname`,
+ * so `__dirname` must never be used to read user-facing files. In production
+ * the file is resolved from the folder that contains the executable.
+ *
+ * @param {string} devPath Absolute path used while running from source.
+ * @param {string} fileName File name expected next to the executable.
+ * @returns {string} Absolute path to the file.
+ * @throws {TypeError} If `devPath` or `fileName` is not a non-empty string.
+ */
+export function resolveShippedFile(devPath, fileName) {
+  if (typeof devPath !== 'string' || devPath.length === 0) {
+    throw new TypeError('devPath must be a non-empty string.');
+  }
+
+  if (typeof fileName !== 'string' || fileName.length === 0) {
+    throw new TypeError('fileName must be a non-empty string.');
+  }
+
+  if (isDebug()) return devPath;
+
+  return path.join(path.dirname(process.execPath), fileName);
+}
+
+/**
  * @param {boolean|string} value
  * @returns {boolean}
  */
@@ -63,7 +89,7 @@ export function createAppDirectory(FOLDER_NAME, defaultFolder) {
 
   if (!fs.existsSync(appDirectory)) {
     console.log(`[APP] [WARNING] Directory ${appDirectory} not found. Creating...`);
-    fs.mkdirSync(appDirectory);
+    fs.mkdirSync(appDirectory, { recursive: true });
     console.log(`[APP] [SUCCESS] Directory ${appDirectory} successfully created.`);
   } else {
     console.log(`[APP] [INFO] Directory ${appDirectory} already exists.`);
