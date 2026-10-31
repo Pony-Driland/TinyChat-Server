@@ -193,7 +193,7 @@ const clearDistFolder = () => {
 // ----------------------
 const transpileWithBabel = () => {
   console.log('🔨 Transpiling code with Babel...');
-  
+
   const env = { ...process.env };
   Object.keys(env).forEach((key) => {
     if (key.startsWith('npm_config_version_') || key === 'npm_config_argv') {
@@ -204,18 +204,14 @@ const transpileWithBabel = () => {
   const options = { stdio: 'inherit', env };
   const babel = './node_modules/.bin/babel';
 
-  execSync(
-    `${babel} ${config.babelSourceDir} --out-dir ${config.outputDir}/${config.babelSourceDir} --copy-files`,
-    options
-  );
-  execSync(
-    `${babel} ${config.babelSourceDir2} --out-dir ${config.outputDir}/${config.babelSourceDir2} --copy-files`,
-    options
-  );
-  execSync(
-    `${babel} ${config.babelSourceDir3} --out-dir ${config.outputDir}/${config.babelSourceDir3} --copy-files`,
-    options
-  );
+  const sourceDirs = [config.babelSourceDir, config.babelSourceDir2, config.babelSourceDir3];
+
+  for (const sourceDir of sourceDirs) {
+    execSync(
+      `${babel} ${sourceDir} --out-dir ${config.outputDir}/${sourceDir} --copy-files`,
+      options,
+    );
+  }
 };
 
 // ----------------------
@@ -255,16 +251,25 @@ const packageWithNexe = async (python) => {
     throw new TypeError('python.command must be a non-empty string.');
   }
 
+  if (typeof python.version !== 'string' || python.version.length === 0) {
+    throw new TypeError('python.version must be a non-empty string.');
+  }
+
   console.log(`📦 Packaging with nexe...`);
   console.log(`🐍 Python: ${python.command} (${python.version})`);
 
   process.env.PYTHON = python.command;
 
   const rootFolder = path.join(__dirname, '../../');
+  const distRoot = path.join(rootFolder, 'dist');
 
   const cfgBase = {
     name: 'Tiny Roleplay Server Chat',
     python: python.command,
+    // resourceRoot must be the project root so the glob below produces the
+    // exact same path the application requests at runtime.
+    resourceRoot: rootFolder,
+    resources: ['dist/src/**/*.ini'],
     rc: {
       CompanyName: 'JasminDreasond',
       ProductName: 'Tiny Roleplay Server Chat',
@@ -277,17 +282,15 @@ const packageWithNexe = async (python) => {
   };
 
   await compile({
-    resources: [path.join(rootFolder, './dist/src/server/config.ini')],
-    input: path.join(rootFolder, './dist/src/server/index.js'),
-    output: path.join(rootFolder, `./dist/${config.outputDirName}/tiny-chat`),
     ...cfgBase,
+    input: path.join(distRoot, 'src/server/index.js'),
+    output: path.join(rootFolder, `./dist/${config.outputDirName}/tiny-chat`),
   });
 
   await compile({
-    resources: [path.join(rootFolder, './dist/src/proxy/config.ini')],
-    input: path.join(rootFolder, './dist/src/proxy/index.js'),
-    output: path.join(rootFolder, `./dist/${config.outputDirName}/tiny-chat-proxy`),
     ...cfgBase,
+    input: path.join(distRoot, 'src/proxy/index.js'),
+    output: path.join(rootFolder, `./dist/${config.outputDirName}/tiny-chat-proxy`),
   });
 };
 
