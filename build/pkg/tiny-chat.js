@@ -11,7 +11,24 @@ const config = {
   babelSourceDir: 'src/server',
   babelSourceDir2: 'src/proxy',
   babelSourceDir3: 'src/api',
+  sourceFolderName: 'src',
 };
+
+/**
+ * Folder that receives the packaged binaries and the transpiled sources.
+ * Forward slashes are mandatory: the value is injected into a shell command.
+ *
+ * @type {string}
+ */
+const buildOutputDir = `${config.outputDir}/${config.outputDirName}`;
+
+/**
+ * Folder that receives the transpiled sources.
+ * It lives inside the build folder so the executable resolves `./src/**` at runtime.
+ *
+ * @type {string}
+ */
+const transpiledDir = `${buildOutputDir}/${config.sourceFolderName}`;
 
 const PYTHON_CANDIDATES =
   process.platform === 'win32' ? ['python', 'python3'] : ['python3', 'python'];
@@ -207,10 +224,7 @@ const transpileWithBabel = () => {
   const sourceDirs = [config.babelSourceDir, config.babelSourceDir2, config.babelSourceDir3];
 
   for (const sourceDir of sourceDirs) {
-    execSync(
-      `${babel} ${sourceDir} --out-dir ${config.outputDir}/${sourceDir} --copy-files`,
-      options,
-    );
+    execSync(`${babel} ${sourceDir} --out-dir ${buildOutputDir}/${sourceDir} --copy-files`, options);
   }
 };
 
@@ -219,7 +233,7 @@ const transpileWithBabel = () => {
 // ----------------------
 const copySqlite3Modules = () => {
   const sourceDir = path.resolve('node_modules/sqlite3');
-  const destDir = path.resolve(`dist/${config.outputDirName}/node_modules/sqlite3`);
+  const destDir = path.resolve(buildOutputDir, 'node_modules/sqlite3');
 
   if (!fs.existsSync(sourceDir)) {
     console.log('⚠️ sqlite3 not found in node_modules.');
@@ -260,8 +274,8 @@ const packageWithNexe = async (python) => {
 
   process.env.PYTHON = python.command;
 
-  const rootFolder = path.join(__dirname, '../../');
-  const distRoot = path.join(rootFolder, 'dist');
+    const rootFolder = path.join(__dirname, '../../');
+  const sourceRoot = path.join(rootFolder, buildOutputDir, config.sourceFolderName);
 
   const cfgBase = {
     name: 'Tiny Roleplay Server Chat',
@@ -269,7 +283,7 @@ const packageWithNexe = async (python) => {
     // resourceRoot must be the project root so the glob below produces the
     // exact same path the application requests at runtime.
     resourceRoot: rootFolder,
-    resources: ['dist/src/**/*.ini'],
+    resources: [`${buildOutputDir}/${config.sourceFolderName}/**/*.ini`],
     rc: {
       CompanyName: 'JasminDreasond',
       ProductName: 'Tiny Roleplay Server Chat',
@@ -283,14 +297,14 @@ const packageWithNexe = async (python) => {
 
   await compile({
     ...cfgBase,
-    input: path.join(distRoot, 'src/server/index.js'),
-    output: path.join(rootFolder, `./dist/${config.outputDirName}/tiny-chat`),
+    input: path.join(sourceRoot, 'server/index.js'),
+    output: path.join(rootFolder, `./${buildOutputDir}/tiny-chat`),
   });
 
   await compile({
     ...cfgBase,
-    input: path.join(distRoot, 'src/proxy/index.js'),
-    output: path.join(rootFolder, `./dist/${config.outputDirName}/tiny-chat-proxy`),
+    input: path.join(sourceRoot, 'proxy/index.js'),
+    output: path.join(rootFolder, `./${buildOutputDir}/tiny-chat-proxy`),
   });
 };
 
