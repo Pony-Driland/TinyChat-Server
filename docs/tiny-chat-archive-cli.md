@@ -31,12 +31,12 @@ Use it when you need to:
 
 ## 🚀 Installation
 
-The CLI is a single file at [`build/chat-archive-cli.js`](../build/chat-archive-cli.js) and **requires no build step**.
+The CLI is a single file at [`build/tiny-chat-archive-cli.js`](../build/tiny-chat-archive-cli.js) and **requires no build step**.
 
 ### Option 1 — Straight from the repository
 
 ```bash
-node build/chat-archive-cli.js --help
+node build/tiny-chat-archive-cli.js --help
 ```
 
 ### Option 2 — Executable (recommended)
@@ -44,7 +44,7 @@ node build/chat-archive-cli.js --help
 The file already has the *shebang* and the execution permission:
 
 ```bash
-./build/chat-archive-cli.js --help
+./build/tiny-chat-archive-cli.js --help
 ```
 
 ### Option 3 — Global command (`tiny-rpg-chat-archive`)

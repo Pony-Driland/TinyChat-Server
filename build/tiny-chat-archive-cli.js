@@ -25,10 +25,10 @@
  * option on export).
  *
  * Usage:
- *   node build/chat-archive-cli.js export --room lobby --chapter 1 --file chat.json
- *   node build/chat-archive-cli.js import --room lobby --chapter 2 --file chat.json
- *   node build/chat-archive-cli.js rooms
- *   node build/chat-archive-cli.js chapters --room lobby
+ *   node build/tiny-chat-archive-cli.js export --room lobby --chapter 1 --file chat.json
+ *   node build/tiny-chat-archive-cli.js import --room lobby --chapter 2 --file chat.json
+ *   node build/tiny-chat-archive-cli.js rooms
+ *   node build/tiny-chat-archive-cli.js chapters --room lobby
  *
  * Run with --help for the full list of options.
  */
@@ -82,7 +82,7 @@ const HELP = `
 ${color.bold('Tiny Chat - Chat Archive CLI')} v${pkg.version}
 
 ${color.bold('USAGE')}
-  node build/chat-archive-cli.js <command> [options]
+  node build/tiny-chat-archive-cli.js <command> [options]
 
 ${color.bold('COMMANDS')}
   export        Export a room chapter (or every chapter) to a JSON file
@@ -117,13 +117,13 @@ ${color.bold('OPTIONAL METADATA')}
 
 ${color.bold('EXAMPLES')}
   # interactive: asks the room and the chapter
-  node build/chat-archive-cli.js export
+  node build/tiny-chat-archive-cli.js export
 
   # export every chapter of a room
-  node build/chat-archive-cli.js export --room lobby --chapter all -f lobby.json
+  node build/tiny-chat-archive-cli.js export --room lobby --chapter all -f lobby.json
 
   # import into chapter 3, replacing whatever was there
-  node build/chat-archive-cli.js import -r lobby -c 3 -f lobby.json -m replace
+  node build/tiny-chat-archive-cli.js import -r lobby -c 3 -f lobby.json -m replace
 `;
 
 // -----------------------------------------------------------------------------

@@ -5,7 +5,7 @@ import { dirname, join } from 'path';
 const here = dirname(fileURLToPath(import.meta.url));
 
 export const ROOT = join(here, '..', '..');
-export const CLI = join(ROOT, 'build', 'chat-archive-cli.js');
+export const CLI = join(ROOT, 'build', 'tiny-chat-archive-cli.js');
 
 /**
  * Runs the archive CLI and resolves with its output.

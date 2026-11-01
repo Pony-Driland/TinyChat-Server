@@ -81,7 +81,7 @@ describe('interface', () => {
   });
 
   test('the file is executable and has a shebang', () => {
-    const source = readFileSync(new URL('../build/chat-archive-cli.js', import.meta.url), 'utf-8');
+    const source = readFileSync(new URL('../build/tiny-chat-archive-cli.js', import.meta.url), 'utf-8');
     assert.ok(source.startsWith('#!/usr/bin/env node'));
   });
 });

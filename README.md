@@ -27,12 +27,12 @@ Backup, migrate and edit your chat history from the terminal — export any room
 plain JSON file and import it back, with interactive room/chapter selection.
 
 ```bash
-./build/chat-archive-cli.js rooms
-./build/chat-archive-cli.js export --room lobby --chapter all --file lobby.json
-./build/chat-archive-cli.js import --room lobby --chapter 2 --file lobby.json
+./build/tiny-chat-archive-cli.js rooms
+./build/tiny-chat-archive-cli.js export --room lobby --chapter all --file lobby.json
+./build/tiny-chat-archive-cli.js import --room lobby --chapter 2 --file lobby.json
 ```
 
-📖 **[Full documentation →](docs/chat-archive-cli.md)**
+📖 **[Full documentation →](docs/tiny-chat-archive-cli.md)**
 
 ## 🧩 About the Project
 
