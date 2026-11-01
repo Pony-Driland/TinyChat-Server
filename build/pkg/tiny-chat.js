@@ -260,22 +260,24 @@ const bundleEntry = async (entryPoint, outfile) => {
 };
 
 /**
- * Bundles the server and the proxy with esbuild.
+ * Bundles the server, the proxy, the archive CLI and the unified launcher.
  *
- * @returns {Promise<void>} Resolves when both bundles are written.
+ * @returns {Promise<void>} Resolves when every bundle is written.
  */
 const bundleWithEsbuild = async () => {
   console.log('🔨 Bundling code with esbuild...');
 
-  await bundleEntry(
-    path.join(projectRoot, 'src', 'server', 'index.js'),
-    path.join(stagingPath, 'server.cjs'),
-  );
+  /** @type {ReadonlyArray<{ entry: string, bundle: string }>} */
+  const targets = [
+    { entry: 'src/server/index.js', bundle: 'server.cjs' },
+    { entry: 'src/proxy/index.js', bundle: 'proxy.cjs' },
+    { entry: 'build/tiny-chat-archive-cli.js', bundle: 'archive-cli.cjs' },
+    { entry: 'src/launcher.js', bundle: 'launcher.cjs' },
+  ];
 
-  await bundleEntry(
-    path.join(projectRoot, 'src', 'proxy', 'index.js'),
-    path.join(stagingPath, 'proxy.cjs'),
-  );
+  for (const { entry, bundle } of targets) {
+    await bundleEntry(path.join(projectRoot, entry), path.join(stagingPath, bundle));
+  }
 };
 
 /**
@@ -501,10 +503,10 @@ const copyNativeModules = () => {
 // ----------------------
 
 /**
- * Packages both binaries with nexe.
+ * Packages every binary with nexe.
  *
  * @param {PythonInterpreter} python Interpreter resolved by {@link resolvePython}.
- * @returns {Promise<void>} Resolves when both binaries are written.
+ * @returns {Promise<void>} Resolves when every binary is written.
  * @throws {TypeError} If `python` is not a valid {@link PythonInterpreter}.
  */
 const packageWithNexe = async (python) => {
@@ -525,32 +527,55 @@ const packageWithNexe = async (python) => {
 
   process.env.PYTHON = python.command;
 
-  const cfgBase = {
-    name: 'Tiny Roleplay Server Chat',
-    python: python.command,
-    resourceRoot: projectRoot,
-    rc: {
-      CompanyName: 'JasminDreasond',
-      ProductName: 'Tiny Roleplay Server Chat',
-      FileDescription: 'Lightweight server for roleplay/RPG chat rooms.',
-      OriginalFilename: 'tiny-chat.exe',
-      InternalName: 'tiny-chat',
-      LegalCopyright: 'GNU AFFERO GENERAL PUBLIC LICENSE Version 3, 19 November 2007',
+  /**
+   * @typedef {Object} NexeTarget
+   * @property {string} bundle Bundle file name inside the staging folder.
+   * @property {string} binary Output binary name (without extension).
+   * @property {string} description Windows FileDescription metadata.
+   */
+
+  /** @type {readonly NexeTarget[]} */
+  const targets = [
+    {
+      bundle: 'server.cjs',
+      binary: 'tiny-chat',
+      description: 'Lightweight server for roleplay/RPG chat rooms.',
     },
-    build: true,
-  };
+    {
+      bundle: 'proxy.cjs',
+      binary: 'tiny-chat-proxy',
+      description: 'Socket.IO proxy for the Tiny Roleplay chat server.',
+    },
+    {
+      bundle: 'archive-cli.cjs',
+      binary: 'tiny-chat-archive',
+      description: 'Import and export chat history from a Tiny Chat database.',
+    },
+    {
+      bundle: 'launcher.cjs',
+      binary: 'tiny-chat-all',
+      description: 'Unified Tiny Chat binary (server, proxy and archive CLI).',
+    },
+  ];
 
-  await compile({
-    ...cfgBase,
-    input: path.join(stagingPath, 'server.cjs'),
-    output: path.join(buildOutputPath, 'tiny-chat'),
-  });
-
-  await compile({
-    ...cfgBase,
-    input: path.join(stagingPath, 'proxy.cjs'),
-    output: path.join(buildOutputPath, 'tiny-chat-proxy'),
-  });
+  for (const target of targets) {
+    await compile({
+      name: 'Tiny Roleplay Server Chat',
+      python: python.command,
+      resourceRoot: projectRoot,
+      rc: {
+        CompanyName: 'JasminDreasond',
+        ProductName: 'Tiny Roleplay Server Chat',
+        FileDescription: target.description,
+        OriginalFilename: `${target.binary}${process.platform === 'win32' ? '.exe' : ''}`,
+        InternalName: target.binary,
+        LegalCopyright: 'GNU AFFERO GENERAL PUBLIC LICENSE Version 3, 19 November 2007',
+      },
+      build: true,
+      input: path.join(stagingPath, target.bundle),
+      output: path.join(buildOutputPath, target.binary),
+    });
+  }
 };
 
 // ----------------------
