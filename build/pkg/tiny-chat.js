@@ -21,12 +21,17 @@ const config = {
  * @type {readonly string[]}
  */
 const EXTERNAL_MODULES = Object.freeze([
-  'sqlite3', // Native binding, shipped next to the binary.
-  'pg', // Optional peer of puddysql.
-  'pg-native', // Optional native binding of pg.
-  'bufferutil', // Optional native binding of ws.
-  'utf-8-validate', // Optional native binding of ws.
+  'sqlite3',
 ]);
+
+/**
+ * Packages that must be shipped as plain folders next to the binary.
+ *
+ * Each entry is copied together with its whole runtime dependency tree.
+ *
+ * @type {readonly string[]}
+ */
+const NATIVE_MODULES = Object.freeze(['sqlite3']);
 
 const projectRoot = path.resolve(__dirname, '../../');
 const buildOutputDir = `${config.outputDir}/${config.outputDirName}`;
@@ -300,20 +305,140 @@ const copyConfigTemplates = () => {
 };
 
 // ----------------------
-// Copy sqlite3 only
+// Native modules
 // ----------------------
-const copySqlite3Modules = () => {
-  const sourceDir = path.join(projectRoot, 'node_modules', 'sqlite3');
-  const destDir = path.join(buildOutputPath, 'node_modules', 'sqlite3');
 
-  if (!fs.existsSync(sourceDir)) {
-    console.log('⚠️ sqlite3 not found in node_modules.');
-    return;
+/**
+ * Resolves the folder of an installed package.
+ *
+ * @param {string} packageName Package name. Scoped names are supported.
+ * @param {string} fromDir Directory used as the resolution base.
+ * @returns {string|null} Absolute path of the package folder, or null when not found.
+ * @throws {TypeError} If `packageName` or `fromDir` is not a non-empty string.
+ */
+const resolvePackageDir = (packageName, fromDir) => {
+  if (typeof packageName !== 'string' || packageName.length === 0) {
+    throw new TypeError('packageName must be a non-empty string.');
   }
 
-  console.log('📂 Copying node_modules/sqlite3 to the final destination...');
-  fs.ensureDirSync(destDir);
-  fs.copySync(sourceDir, destDir);
+  if (typeof fromDir !== 'string' || fromDir.length === 0) {
+    throw new TypeError('fromDir must be a non-empty string.');
+  }
+
+  try {
+    return path.dirname(require.resolve(`${packageName}/package.json`, { paths: [fromDir] }));
+  } catch {
+    /* Some packages hide package.json behind the "exports" field. */
+  }
+
+  let current;
+
+  try {
+    current = path.dirname(require.resolve(packageName, { paths: [fromDir] }));
+  } catch {
+    return null;
+  }
+
+  while (true) {
+    const manifestPath = path.join(current, 'package.json');
+
+    if (fs.existsSync(manifestPath)) {
+      try {
+        if (JSON.parse(fs.readFileSync(manifestPath, 'utf8')).name === packageName) return current;
+      } catch {
+        /* Ignore malformed manifest and keep walking up. */
+      }
+    }
+
+    const parent = path.dirname(current);
+    if (parent === current) return null;
+    current = parent;
+  }
+};
+
+/**
+ * Walks the runtime dependency tree of a package.
+ *
+ * Only `dependencies` are followed: `devDependencies` never ship and
+ * `optionalDependencies` are not required to boot the binary.
+ *
+ * @param {string} rootName Name of the root package.
+ * @param {string} fromDir Directory used as the resolution base.
+ * @returns {Map<string, string>} Map of package name to absolute folder.
+ * @throws {TypeError} If `rootName` or `fromDir` is not a non-empty string.
+ */
+const collectDependencyTree = (rootName, fromDir) => {
+  if (typeof rootName !== 'string' || rootName.length === 0) {
+    throw new TypeError('rootName must be a non-empty string.');
+  }
+
+  if (typeof fromDir !== 'string' || fromDir.length === 0) {
+    throw new TypeError('fromDir must be a non-empty string.');
+  }
+
+  /** @type {Map<string, string>} */
+  const collected = new Map();
+  const queue = [{ name: rootName, base: fromDir }];
+
+  while (queue.length > 0) {
+    const { name, base } = queue.shift();
+    if (collected.has(name)) continue;
+
+    const packageDir = resolvePackageDir(name, base);
+
+    if (!packageDir) {
+      console.warn(`   ⚠️  Dependency not found, skipping: ${name}`);
+      collected.set(name, '');
+      continue;
+    }
+
+    collected.set(name, packageDir);
+
+    const manifest = JSON.parse(fs.readFileSync(path.join(packageDir, 'package.json'), 'utf8'));
+
+    for (const dependency of Object.keys(manifest.dependencies ?? {})) {
+      if (!collected.has(dependency)) queue.push({ name: dependency, base: packageDir });
+    }
+  }
+
+  return collected;
+};
+
+/**
+ * Copies the native modules and their runtime dependencies next to the binary.
+ *
+ * Native bindings (`.node`) cannot be bundled, so the whole dependency tree is
+ * shipped as a plain `node_modules` folder and resolved at runtime.
+ *
+ * @returns {void}
+ */
+const copyNativeModules = () => {
+  const targetNodeModules = path.join(buildOutputPath, 'node_modules');
+
+  for (const moduleName of NATIVE_MODULES) {
+    const sourceDir = path.join(projectRoot, 'node_modules', moduleName);
+
+    if (!fs.existsSync(sourceDir)) {
+      console.log(`⚠️ ${moduleName} not found in node_modules.`);
+      continue;
+    }
+
+    console.log(`📂 Copying ${moduleName} and its dependencies...`);
+
+    const tree = collectDependencyTree(moduleName, projectRoot);
+    let copied = 0;
+
+    for (const [name, packageDir] of tree) {
+      if (!packageDir) continue;
+
+      const destination = path.join(targetNodeModules, name);
+      fs.ensureDirSync(path.dirname(destination));
+      fs.copySync(packageDir, destination, { dereference: true });
+      copied++;
+    }
+
+    console.log(`   ✅ ${copied} package(s) copied.`);
+  }
 };
 
 // ----------------------
@@ -398,7 +523,7 @@ const buildApp = async () => {
   await bundleWithEsbuild();
   copyConfigTemplates();
   await packageWithNexe(python);
-  copySqlite3Modules();
+  copyNativeModules();
   cleanupStaging();
 
   console.log('🚀 Build completed successfully!');
