@@ -553,12 +553,12 @@ const packageWithNexe = async (python) => {
     {
       bundle: 'archive-cli.cjs',
       binary: 'tiny-chat-archive',
-      description: 'Import and export chat history from a Tiny Chat database.',
+      description: 'Import and export chat history from a Tiny RPG Chat database.',
     },
     {
       bundle: 'launcher.cjs',
       binary: 'tiny-chat-all',
-      description: 'Unified Tiny Chat binary (server, proxy and archive CLI).',
+      description: 'Unified Tiny RPG Chat binary (server, proxy and archive CLI).',
     },
   ];
 

@@ -2,9 +2,9 @@
 'use strict';
 
 /**
- * Tiny Chat - Chat Archive CLI
+ * Tiny RPG Chat - Chat Archive CLI
  * =============================================================================
- * Imports and exports chat history between a Tiny Chat database and a plain
+ * Imports and exports chat history between a Tiny RPG Chat database and a plain
  * JSON file that follows this shape:
  *
  *   [
@@ -79,7 +79,7 @@ const log = {
 };
 
 const HELP = `
-${color.bold('Tiny Chat - Chat Archive CLI')} v${pkg.version}
+${color.bold('Tiny RPG Chat - Chat Archive CLI')} v${pkg.version}
 
 ${color.bold('USAGE')}
   node build/tiny-chat-archive-cli.js <command> [options]
@@ -962,7 +962,7 @@ async function main() {
 
   try {
     if (!args.json) {
-      console.log(color.bold('\nTiny Chat - Chat Archive CLI'));
+      console.log(color.bold('\nTiny RPG Chat - Chat Archive CLI'));
       console.log(color.dim(`  database: ${type}${file ? ` (${file})` : ''}`));
     }
 

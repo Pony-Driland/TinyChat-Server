@@ -1,5 +1,5 @@
 /**
- * Shared help text and version helpers for every Tiny Chat binary.
+ * Shared help text and version helpers for every Tiny RPG Chat binary.
  *
  * @module help
  */
@@ -38,13 +38,13 @@ export const VERSION = readVersion();
  */
 export const getServerHelp = (bin = 'tiny-chat') =>
   `
-Tiny Chat Server v${VERSION}
+Tiny RPG Chat Server v${VERSION}
 
 USAGE
   ${bin} [options]
 
 DESCRIPTION
-  Starts the Tiny Chat server. The server reads its configuration from
+  Starts the Tiny RPG Chat server. The server reads its configuration from
   config.ini next to the executable (or from the current directory when
   running from source).
 
@@ -89,7 +89,7 @@ EXAMPLES
  */
 export const getLauncherHelp = (bin = 'tiny-chat-all') =>
   `
-Tiny Chat v${VERSION}
+Tiny RPG Chat v${VERSION}
 
 USAGE
   ${bin} [--app <mode>] [options]
@@ -110,7 +110,7 @@ CONFIGURATION OVERRIDES
   Forwarded to the selected mode. See "${bin} --app <mode> --help".
 
 SERVER MODE (--app server)
-  Starts the Tiny Chat server. The server reads its configuration from
+  Starts the Tiny RPG Chat server. The server reads its configuration from
   config.ini next to the executable.
 
   Files:
@@ -144,7 +144,7 @@ EXAMPLES
  */
 export const getProxyHelp = (bin = 'tiny-chat-proxy') =>
   `
-Tiny Chat Proxy v${VERSION}
+Tiny RPG Chat Proxy v${VERSION}
 
 USAGE
   ${bin} [options]

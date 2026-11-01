@@ -1,5 +1,5 @@
 /**
- * Unified entry point for the Tiny Chat binaries.
+ * Unified entry point for the Tiny RPG Chat binaries.
  *
  * The mode is selected with `--app <mode>` and defaults to `server`. The flag
  * is stripped from `process.argv` before the target module is loaded, so the
