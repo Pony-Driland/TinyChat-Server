@@ -89,6 +89,7 @@ ${color.bold('COMMANDS')}
   import        Import a JSON file into a room chapter
   rooms         List every room available in the database
   chapters      List every chapter of a room
+  reset-password Reset the password of a user account
 
 ${color.bold('OPTIONS')}
   -d, --data-dir <path>   Folder that contains config.ini and database.db
@@ -104,6 +105,8 @@ ${color.bold('OPTIONS')}
       --json              Machine readable output (no prompts, JSON on stdout)
   -h, --help              Show this help
   -v, --version           Show the CLI version
+  -u, --user <id>         User id (target of the command)
+      --password <value>  New password (reset-password, random when omitted)
 
 ${color.bold('IMPORT MODES')}
   merge     Insert new messages and skip the ones that already exist (default)
@@ -124,6 +127,12 @@ ${color.bold('EXAMPLES')}
 
   # import into chapter 3, replacing whatever was there
   node build/tiny-chat-archive-cli.js import -r lobby -c 3 -f lobby.json -m replace
+
+  # reset a password (random password is printed once)
+  node build/tiny-chat-archive-cli.js reset-password --user admin
+
+  # reset a password to a known value
+  node build/tiny-chat-archive-cli.js reset-password --user admin --password "hunter2hunter2hunter2"
 `;
 
 // -----------------------------------------------------------------------------
@@ -205,6 +214,13 @@ function parseArgs(argv) {
         break;
       case 'json':
         args.json = true;
+        break;
+      case 'u':
+      case 'user':
+        args.user = nextValue();
+        break;
+      case 'password':
+        args.password = nextValue();
         break;
       default:
         throw new Error(`Unknown option: ${arg}`);
@@ -370,18 +386,32 @@ function createSqliteAdapter(file) {
   const sqlite3 = require('sqlite3');
   const db = new sqlite3.Database(file);
 
+  const all = (sql, params = []) =>
+    new Promise((resolve, reject) =>
+      db.all(sql, params, (err, rows) => (err ? reject(err) : resolve(rows || []))),
+    );
+  const run = (sql, params = []) =>
+    new Promise((resolve, reject) =>
+      db.run(sql, params, function onDone(err) {
+        return err ? reject(err) : resolve(this);
+      }),
+    );
+
   return {
     dialect: 'sqlite3',
-    all: (sql, params = []) =>
-      new Promise((resolve, reject) =>
-        db.all(sql, params, (err, rows) => (err ? reject(err) : resolve(rows || []))),
-      ),
-    run: (sql, params = []) =>
-      new Promise((resolve, reject) =>
-        db.run(sql, params, function onDone(err) {
-          return err ? reject(err) : resolve(this);
-        }),
-      ),
+    all,
+    run,
+    transaction: async (fn) => {
+      await run('BEGIN');
+      try {
+        const result = await fn({ all, run });
+        await run('COMMIT');
+        return result;
+      } catch (error) {
+        await run('ROLLBACK');
+        throw error;
+      }
+    },
     close: () => new Promise((resolve) => db.close(() => resolve())),
   };
 }
@@ -396,7 +426,6 @@ function createPostgresAdapter(config) {
     port: Number(unquote(config.port, '5432')) || 5432,
   });
 
-  // The whole CLI is written using `?` placeholders.
   const toPg = (sql) => {
     let index = 0;
     return sql.replace(/\?/g, () => `$${++index}`);
@@ -406,6 +435,24 @@ function createPostgresAdapter(config) {
     dialect: 'postgre',
     all: async (sql, params = []) => (await pool.query(toPg(sql), params)).rows,
     run: (sql, params = []) => pool.query(toPg(sql), params),
+    transaction: async (fn) => {
+      const client = await pool.connect();
+      const tx = {
+        all: async (sql, params = []) => (await client.query(toPg(sql), params)).rows,
+        run: (sql, params = []) => client.query(toPg(sql), params),
+      };
+      try {
+        await client.query('BEGIN');
+        const result = await fn(tx);
+        await client.query('COMMIT');
+        return result;
+      } catch (error) {
+        await client.query('ROLLBACK');
+        throw error;
+      } finally {
+        client.release();
+      }
+    },
     close: () => pool.end(),
   };
 }
@@ -418,11 +465,11 @@ async function connectDatabase(dataDir) {
   if (type === 'sqlite3') {
     const file = path.join(dataDir, 'database.db');
     if (!fs.existsSync(file)) throw new Error(`Database file not found: ${file}`);
-    return { adapter: createSqliteAdapter(file), type, file };
+    return { adapter: createSqliteAdapter(file), type, file, config };
   }
 
   if (type === 'postgre' || type === 'postgres' || type === 'postgresql')
-    return { adapter: createPostgresAdapter(database), type: 'postgre', file: null };
+    return { adapter: createPostgresAdapter(database), type: 'postgre', file: null, config };
 
   throw new Error(`Unsupported database type: ${type}`);
 }
@@ -510,6 +557,10 @@ const createRepository = (adapter) => ({
         row.historyId,
       ],
     );
+  },
+
+  async updatePassword(userId, hashedPassword) {
+    return adapter.run('UPDATE users SET password = ? WHERE userId = ?', [hashedPassword, userId]);
   },
 });
 
@@ -950,11 +1001,11 @@ async function main() {
   const command = args._[0];
   if (!command) return console.log(HELP);
 
-  if (!['export', 'import', 'rooms', 'chapters'].includes(command))
+  if (!['export', 'import', 'rooms', 'chapters', 'reset-password'].includes(command))
     throw new Error(`Unknown command: ${command}`);
 
   const dataDir = resolveDataDir(args.dataDir);
-  const { adapter, type, file } = await connectDatabase(dataDir);
+  const { adapter, type, file, config } = await connectDatabase(dataDir);
   const repository = createRepository(adapter);
   // Piped stdin is valid too (e.g. `printf '1\n2\n' | cli export`), so only
   // disable the prompts when the output has to stay machine readable.
@@ -970,6 +1021,8 @@ async function main() {
     else if (command === 'chapters') await commandChapters(repository, prompt, args);
     else if (command === 'export') await commandExport(repository, prompt, args);
     else if (command === 'import') await commandImport(repository, prompt, args);
+    else if (command === 'reset-password')
+      await commandResetPassword(repository, prompt, args, config);
   } finally {
     prompt.close();
     await adapter.close();
