@@ -15,9 +15,6 @@ const config = {
 /**
  * Modules that must stay outside the bundle.
  *
- * Native bindings (`.node`) cannot be embedded by esbuild, so they are
- * resolved at runtime from `node_modules/` next to the executable.
- *
  * @type {readonly string[]}
  */
 const EXTERNAL_MODULES = Object.freeze([
