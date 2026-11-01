@@ -22,13 +22,23 @@ const EXTERNAL_MODULES = Object.freeze([
 ]);
 
 /**
- * Packages that must be shipped as plain folders next to the binary.
- *
- * Each entry is copied together with its whole runtime dependency tree.
- *
- * @type {readonly string[]}
+ * @typedef {string | readonly [string, readonly string[]]} NativeModuleEntry
  */
-const NATIVE_MODULES = Object.freeze(['sqlite3']);
+
+/**
+ * Native modules that must be shipped next to the binary.
+ *
+ * Each entry is either:
+ * - A string: the package and its whole runtime dependency tree are copied.
+ * - A tuple `[name, whitelist]`: only the packages listed in `whitelist`
+ *   (plus the root) are copied. Use this when the package declares
+ *   install-time-only dependencies that should not ship.
+ *
+ * @type {readonly NativeModuleEntry[]}
+ */
+const NATIVE_MODULES = Object.freeze([
+  ['sqlite3', ['bindings', 'file-uri-to-path']],
+]);
 
 const projectRoot = path.resolve(__dirname, '../../');
 const buildOutputDir = `${config.outputDir}/${config.outputDirName}`;
@@ -354,17 +364,54 @@ const resolvePackageDir = (packageName, fromDir) => {
 };
 
 /**
+ * Normalizes a `NATIVE_MODULES` entry.
+ *
+ * @param {NativeModuleEntry} entry Raw entry.
+ * @returns {{ name: string, whitelist: ReadonlySet<string> | null }} Normalized entry.
+ * @throws {TypeError} If the entry is malformed.
+ */
+const normalizeNativeEntry = (entry) => {
+  if (typeof entry === 'string') {
+    if (entry.length === 0) {
+      throw new TypeError('NATIVE_MODULES entry must not be an empty string.');
+    }
+
+    return { name: entry, whitelist: null };
+  }
+
+  if (!Array.isArray(entry) || entry.length !== 2) {
+    throw new TypeError('NATIVE_MODULES entry must be a string or a [name, whitelist] tuple.');
+  }
+
+  const [name, whitelist] = entry;
+
+  if (typeof name !== 'string' || name.length === 0) {
+    throw new TypeError('NATIVE_MODULES entry name must be a non-empty string.');
+  }
+
+  if (!Array.isArray(whitelist) || whitelist.some((item) => typeof item !== 'string')) {
+    throw new TypeError(`NATIVE_MODULES whitelist of "${name}" must be an array of strings.`);
+  }
+
+  return { name, whitelist: new Set(whitelist) };
+};
+
+/**
  * Walks the runtime dependency tree of a package.
  *
  * Only `dependencies` are followed: `devDependencies` never ship and
  * `optionalDependencies` are not required to boot the binary.
  *
+ * When `whitelist` is provided, only the packages it contains are resolved
+ * and walked. The root package is always included.
+ *
  * @param {string} rootName Name of the root package.
  * @param {string} fromDir Directory used as the resolution base.
+ * @param {ReadonlySet<string> | null} [whitelist=null] Allowed package names, or null for everything.
  * @returns {Map<string, string>} Map of package name to absolute folder.
- * @throws {TypeError} If `rootName` or `fromDir` is not a non-empty string.
+ * @throws {TypeError} If an argument has an unexpected type.
  */
-const collectDependencyTree = (rootName, fromDir) => {
+const collectDependencyTree = (rootName, fromDir, whitelist = null) => {
   if (typeof rootName !== 'string' || rootName.length === 0) {
     throw new TypeError('rootName must be a non-empty string.');
   }
@@ -373,13 +420,18 @@ const collectDependencyTree = (rootName, fromDir) => {
     throw new TypeError('fromDir must be a non-empty string.');
   }
 
+  if (whitelist !== null && !(whitelist instanceof Set)) {
+    throw new TypeError('whitelist must be a Set or null.');
+  }
+
   /** @type {Map<string, string>} */
   const collected = new Map();
-  const queue = [{ name: rootName, base: fromDir }];
+  const queue = [{ name: rootName, base: fromDir, isRoot: true }];
 
   while (queue.length > 0) {
-    const { name, base } = queue.shift();
+    const { name, base, isRoot } = queue.shift();
     if (collected.has(name)) continue;
+    if (!isRoot && whitelist !== null && !whitelist.has(name)) continue;
 
     const packageDir = resolvePackageDir(name, base);
 
@@ -394,7 +446,9 @@ const collectDependencyTree = (rootName, fromDir) => {
     const manifest = JSON.parse(fs.readFileSync(path.join(packageDir, 'package.json'), 'utf8'));
 
     for (const dependency of Object.keys(manifest.dependencies ?? {})) {
-      if (!collected.has(dependency)) queue.push({ name: dependency, base: packageDir });
+      if (!collected.has(dependency)) {
+        queue.push({ name: dependency, base: packageDir, isRoot: false });
+      }
     }
   }
 
@@ -412,23 +466,26 @@ const collectDependencyTree = (rootName, fromDir) => {
 const copyNativeModules = () => {
   const targetNodeModules = path.join(buildOutputPath, 'node_modules');
 
-  for (const moduleName of NATIVE_MODULES) {
-    const sourceDir = path.join(projectRoot, 'node_modules', moduleName);
+  for (const entry of NATIVE_MODULES) {
+    const { name, whitelist } = normalizeNativeEntry(entry);
+    const sourceDir = path.join(projectRoot, 'node_modules', name);
 
     if (!fs.existsSync(sourceDir)) {
-      console.log(`⚠️ ${moduleName} not found in node_modules.`);
+      console.log(`⚠️ ${name} not found in node_modules.`);
       continue;
     }
 
-    console.log(`📂 Copying ${moduleName} and its dependencies...`);
+    console.log(
+      `📂 Copying ${name}${whitelist ? ` (whitelist: ${whitelist.size} package(s))` : ' and its dependencies'}...`,
+    );
 
-    const tree = collectDependencyTree(moduleName, projectRoot);
+    const tree = collectDependencyTree(name, projectRoot, whitelist);
     let copied = 0;
 
-    for (const [name, packageDir] of tree) {
+    for (const [pkgName, packageDir] of tree) {
       if (!packageDir) continue;
 
-      const destination = path.join(targetNodeModules, name);
+      const destination = path.join(targetNodeModules, pkgName);
       fs.ensureDirSync(path.dirname(destination));
       fs.copySync(packageDir, destination, { dereference: true });
       copied++;
@@ -511,9 +568,6 @@ const buildApp = async () => {
   console.log('🎯 Build Information:');
   console.log(`   - Dist Directory: ${config.outputDirName}`);
   console.log(`   - Output Directory: ${config.outputDir}`);
-  console.log(`   - Server Directory: ${config.babelSourceDir}`);
-  console.log(`   - Proxy Directory: ${config.babelSourceDir2}`);
-  console.log(`   - API Directory: ${config.babelSourceDir3}`);
   console.log(`   - Python: ${python.command}`);
 
   clearDistFolder();
