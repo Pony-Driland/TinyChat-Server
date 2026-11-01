@@ -8,15 +8,17 @@
  * @module launcher
  */
 
+import { VERSION, getLauncherHelp } from './api/help';
+
 const MODES = Object.freeze(['server', 'proxy', 'archive']);
 const DEFAULT_MODE = 'server';
-const FLAG = '--app';
+const FLAGS = Object.freeze(['--app', '-a']);
 
 /**
  * Extracts `--app <mode>` (or `--app=<mode>`) from argv.
  *
  * @param {string[]} argv Arguments without the node/script prefix.
- * @returns {{ mode: string, argv: string[] }} The selected mode and the cleaned argv.
+ * @returns {{ mode: string | null, argv: string[] }} The selected mode (null when omitted) and the cleaned argv.
  * @throws {TypeError} If `argv` is not an array.
  * @throws {Error} If `--app` is used without a value.
  */
@@ -31,11 +33,11 @@ const extractMode = (argv) => {
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
 
-    if (arg === FLAG) {
+    if (FLAGS.includes(arg)) {
       const value = argv[i + 1];
 
       if (typeof value === 'undefined') {
-        throw new Error(`${FLAG} requires a value. Use one of: ${MODES.join(', ')}.`);
+        throw new Error(`${arg} requires a value. Use one of: ${MODES.join(', ')}.`);
       }
 
       mode = value;
@@ -43,18 +45,33 @@ const extractMode = (argv) => {
       continue;
     }
 
-    if (arg.startsWith(`${FLAG}=`)) {
-      mode = arg.slice(FLAG.length + 1);
+    if (arg.startsWith('--app=')) {
+      mode = arg.slice('--app='.length);
       continue;
     }
 
     cleaned.push(arg);
   }
 
-  return { mode: mode ?? DEFAULT_MODE, argv: cleaned };
+  return { mode, argv: cleaned };
 };
 
-const { mode, argv } = extractMode(process.argv.slice(2));
+const { mode: rawMode, argv } = extractMode(process.argv.slice(2));
+
+// No --app: the launcher owns --help and --version.
+if (rawMode === null) {
+  if (argv.includes('-h') || argv.includes('--help')) {
+    console.log(getLauncherHelp());
+    process.exit(0);
+  }
+
+  if (argv.includes('-v') || argv.includes('--version')) {
+    console.log(VERSION);
+    process.exit(0);
+  }
+}
+
+const mode = rawMode ?? DEFAULT_MODE;
 
 if (!MODES.includes(mode)) {
   console.error(`Unknown mode: "${mode}". Use one of: ${MODES.join(', ')}.`);

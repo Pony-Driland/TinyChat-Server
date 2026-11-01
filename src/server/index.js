@@ -9,6 +9,19 @@ import userManager from './connection/userManager';
 import roomManager from './connection/roomManager';
 import { getHashString, getIniConfig } from './connection/values';
 import db from './connection/sql';
+import { VERSION, getServerHelp } from '../api/help';
+
+const cliArgs = process.argv.slice(2);
+
+if (cliArgs.includes('-h') || cliArgs.includes('--help')) {
+  console.log(getServerHelp());
+  process.exit(0);
+}
+
+if (cliArgs.includes('-v') || cliArgs.includes('--version')) {
+  console.log(VERSION);
+  process.exit(0);
+}
 
 // Start server
 startFiles().then(async (appStorage) => {
