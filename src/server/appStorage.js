@@ -3,6 +3,7 @@ import { join } from 'path';
 
 import { startDatabase } from './connection/sql';
 import { _setIniConfig } from './connection/values';
+import { applyOverrides, ConfigOverrideError, parseOverrides } from '../api/configOverrides';
 import { createAppDirectory, ensureIniFile, getIniBoolean } from '../api/ini';
 import serverTemplate from './config.ini';
 
@@ -21,6 +22,22 @@ export default async function startFiles() {
       join(appDir, `./config.ini`),
       serverTemplate,
     );
+
+    let applied;
+    try {
+      const overrides = parseOverrides(process.argv.slice(2));
+      applied = applyOverrides(newCfg, overrides, defaultCfg);
+    } catch (error) {
+      if (error instanceof ConfigOverrideError) {
+        console.error(`[APP] [CONFIG] ${error.message}`);
+        process.exit(1);
+      }
+      throw error;
+    }
+
+    if (applied.length > 0) {
+      console.log(`[APP] [CONFIG] Applied ${applied.length} override(s): ${applied.join(', ')}`);
+    }
 
     /**
      * Insert Config

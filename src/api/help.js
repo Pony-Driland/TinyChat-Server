@@ -52,6 +52,19 @@ OPTIONS
   -h, --help       Show this help
   -v, --version    Show the version
 
+CONFIGURATION OVERRIDES
+  --set <section>.<key>=<value>   Override a config.ini value (repeatable)
+
+  Values are coerced: true/false become booleans, numbers become numbers,
+  null becomes null, everything else stays a string. The override is applied
+  on top of the file, so the file is still the source of truth for everything
+  else.
+
+  Examples:
+    ${bin} --set server.port=8080
+    ${bin} --set database.type=postgre --set database.host=db.local
+    ${bin} --set limits.MESSAGE_SIZE=50000
+
 FILES
   config.ini         Server configuration (port, database, limits)
   tiny-chat_data/    Data folder (database, uploads)
@@ -91,6 +104,11 @@ OPTIONS
   -h, --help         Show this help
   -v, --version      Show the version
 
+CONFIGURATION OVERRIDES
+  --set <section>.<key>=<value>   Override a config value (repeatable)
+
+  Forwarded to the selected mode. See "${bin} --app <mode> --help".
+
 SERVER MODE (--app server)
   Starts the Tiny Chat server. The server reads its configuration from
   config.ini next to the executable.
@@ -116,4 +134,41 @@ EXAMPLES
   ${bin} --app proxy
   ${bin} --app archive export --room lobby
   ${bin} --app archive --help
+`.trimStart();
+
+/**
+ * Help text of the standalone proxy binary.
+ *
+ * @param {string} [bin='tiny-chat-proxy'] Binary name shown in the usage line.
+ * @returns {string} The formatted help text.
+ */
+export const getProxyHelp = (bin = 'tiny-chat-proxy') =>
+  `
+Tiny Chat Proxy v${VERSION}
+
+USAGE
+  ${bin} [options]
+
+DESCRIPTION
+  Starts the Socket.IO proxy. The proxy reads its configuration from
+  proxy-config.ini next to the executable.
+
+OPTIONS
+  -h, --help       Show this help
+  -v, --version    Show the version
+
+CONFIGURATION OVERRIDES
+  --set <section>.<key>=<value>   Override a proxy-config.ini value (repeatable)
+
+  Values are coerced: true/false become booleans, numbers become numbers,
+  null becomes null, everything else stays a string. The override is applied
+  on top of the file, so the file is still the source of truth for everything
+  else.
+
+  Examples:
+    ${bin} --set server.port=8080
+    ${bin} --set server.debug=true --set server.timeout=60000
+
+FILES
+  proxy-config.ini   Proxy configuration (port, auth, timeout)
 `.trimStart();

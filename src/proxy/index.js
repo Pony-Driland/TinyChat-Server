@@ -2,6 +2,9 @@ import path from 'path';
 import { isJsonObject } from 'tiny-essentials/basics/objChecker';
 import SocketIoProxyServer from 'tiny-server-essentials/proxy/server';
 
+import { applyOverrides, ConfigOverrideError, parseOverrides } from '../api/configOverrides';
+import { VERSION, getProxyHelp } from '../api/help';
+
 import { createAppDirectory, ensureIniFile, getIniBoolean } from '../api/ini';
 import proxyTemplate from './proxy-config.ini';
 
@@ -10,12 +13,39 @@ import proxyTemplate from './proxy-config.ini';
  */
 
 const startServer = async () => {
-  // Prepare config file...
+  const cliArgs = process.argv.slice(2);
+
+  if (cliArgs.includes('-h') || cliArgs.includes('--help')) {
+    console.log(getProxyHelp());
+    process.exit(0);
+  }
+
+  if (cliArgs.includes('-v') || cliArgs.includes('--version')) {
+    console.log(VERSION);
+    process.exit(0);
+  }
+
   const appDir = createAppDirectory('tiny-chat_proxy', __dirname);
   const { newCfg, defaultCfg } = await ensureIniFile(
     path.join(appDir, `./proxy-config.ini`),
     proxyTemplate,
   );
+
+  let applied;
+  try {
+    const overrides = parseOverrides(cliArgs);
+    applied = applyOverrides(newCfg, overrides, defaultCfg);
+  } catch (error) {
+    if (error instanceof ConfigOverrideError) {
+      console.error(`[PROXY] [CONFIG] ${error.message}`);
+      process.exit(1);
+    }
+    throw error;
+  }
+
+  if (applied.length > 0) {
+    console.log(`[PROXY] [CONFIG] Applied ${applied.length} override(s): ${applied.join(', ')}`);
+  }
 
   /** @type {IniCfg} */
   const cfg = { server: { port: NaN, timeout: NaN, auth: '', debug: false } };
