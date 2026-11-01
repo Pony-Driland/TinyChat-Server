@@ -2,7 +2,7 @@ import path from 'path';
 import { isJsonObject } from 'tiny-essentials/basics/objChecker';
 import SocketIoProxyServer from 'tiny-server-essentials/proxy/server';
 
-import { createAppDirectory, ensureIniFile, getIniBoolean } from '../api/ini';
+import { createAppDirectory, ensureIniFile, getIniBoolean, resolveShippedFile } from '../api/ini';
 
 /**
  * @typedef {{ server: { port: number; timeout: number; auth: string; debug: boolean } }} IniCfg
@@ -12,8 +12,8 @@ const startServer = async () => {
   // Prepare config file...
   const appDir = createAppDirectory('tiny-chat_proxy', __dirname);
   const { newCfg, defaultCfg } = await ensureIniFile(
-    path.join(appDir, `./config.ini`),
-    path.join(__dirname, `./config.ini`),
+    path.join(appDir, `./proxy-config.ini`),
+    resolveShippedFile(path.join(__dirname, `./proxy-config.ini`), 'proxy-config.ini'),
   );
 
   /** @type {IniCfg} */

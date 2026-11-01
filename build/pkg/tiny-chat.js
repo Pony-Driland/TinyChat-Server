@@ -17,9 +17,7 @@ const config = {
  *
  * @type {readonly string[]}
  */
-const EXTERNAL_MODULES = Object.freeze([
-  'sqlite3',
-]);
+const EXTERNAL_MODULES = Object.freeze(['sqlite3']);
 
 /**
  * @typedef {string | readonly [string, readonly string[]]} NativeModuleEntry
@@ -36,9 +34,7 @@ const EXTERNAL_MODULES = Object.freeze([
  *
  * @type {readonly NativeModuleEntry[]}
  */
-const NATIVE_MODULES = Object.freeze([
-  ['sqlite3', ['bindings', 'file-uri-to-path']],
-]);
+const NATIVE_MODULES = Object.freeze([['sqlite3', ['bindings', 'file-uri-to-path']]]);
 
 const projectRoot = path.resolve(__dirname, '../../');
 const buildOutputDir = `${config.outputDir}/${config.outputDirName}`;
@@ -286,7 +282,8 @@ const bundleWithEsbuild = async () => {
  * Copies the editable .ini templates next to the binary.
  *
  * Templates are intentionally kept outside the bundle: the end user must be
- * able to edit them without rebuilding the executable.
+ * able to edit them without rebuilding the executable. Each binary owns a
+ * distinct file name so the server and the proxy never share settings.
  *
  * @returns {void}
  * @throws {Error} If a declared template does not exist in the repository.
@@ -299,6 +296,10 @@ const copyConfigTemplates = () => {
     {
       source: path.join(projectRoot, 'src', 'server', 'config.ini'),
       target: path.join(buildOutputPath, 'config.ini'),
+    },
+    {
+      source: path.join(projectRoot, 'src', 'proxy', 'proxy-config.ini'),
+      target: path.join(buildOutputPath, 'proxy-config.ini'),
     },
   ];
 
