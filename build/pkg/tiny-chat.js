@@ -256,6 +256,7 @@ const bundleEntry = async (entryPoint, outfile) => {
     legalComments: 'none',
     logLevel: 'info',
     external: [...EXTERNAL_MODULES],
+    loader: { '.ini': 'text' },
     define: {
       __APP_VERSION__: JSON.stringify(require('../../package.json').version),
     },
@@ -601,7 +602,6 @@ const buildApp = async () => {
 
   clearDistFolder();
   await bundleWithEsbuild();
-  copyConfigTemplates();
   await packageWithNexe(python);
   copyNativeModules();
   cleanupStaging();

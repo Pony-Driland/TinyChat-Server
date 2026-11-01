@@ -3,7 +3,8 @@ import { join } from 'path';
 
 import { startDatabase } from './connection/sql';
 import { _setIniConfig } from './connection/values';
-import { createAppDirectory, ensureIniFile, getIniBoolean, resolveShippedFile } from '../api/ini';
+import { createAppDirectory, ensureIniFile, getIniBoolean } from '../api/ini';
+import serverTemplate from './config.ini';
 
 export default async function startFiles() {
   let canStart = true;
@@ -18,7 +19,7 @@ export default async function startFiles() {
     const config = {};
     const { newCfg, defaultCfg } = await ensureIniFile(
       join(appDir, `./config.ini`),
-      resolveShippedFile(join(__dirname, `./config.ini`), 'config.ini'),
+      serverTemplate,
     );
 
     /**

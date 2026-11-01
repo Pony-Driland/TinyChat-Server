@@ -41,31 +41,35 @@ export const getIniBoolean = (value) =>
     : false;
 
 /**
- * Function to ensure the .ini file exists. If it doesn't, it copies a template file.
- * @param {string} iniFilePath
- * @param {string} templateFilePath
+ * Ensures the user config file exists, copying the embedded template when needed.
  *
- * @returns {Promise<{ newCfg: { [key: string]: any; }; defaultCfg: { [key: string]: any; }; }>}
+ * The template is embedded in the bundle at build time (esbuild `text` loader),
+ * so the binary never depends on a file shipped next to it.
+ *
+ * @param {string} iniFilePath Absolute path of the user config file.
+ * @param {string} templateContent Raw content of the embedded template.
+ * @returns {Promise<{ newCfg: Record<string, any>, defaultCfg: Record<string, any> }>}
+ * @throws {TypeError} If an argument has an unexpected type.
  */
-export async function ensureIniFile(iniFilePath, templateFilePath) {
-  // Check if the INI file exists
+export async function ensureIniFile(iniFilePath, templateContent) {
+  if (typeof iniFilePath !== 'string' || iniFilePath.length === 0) {
+    throw new TypeError('iniFilePath must be a non-empty string.');
+  }
+
+  if (typeof templateContent !== 'string' || templateContent.length === 0) {
+    throw new TypeError('templateContent must be a non-empty string.');
+  }
+
   if (!fs.existsSync(iniFilePath)) {
     console.log(`[APP] [INI] File ${iniFilePath} does not exist. Copying template...`);
-
-    // Read the template file
-    const templateContent = fs.readFileSync(templateFilePath, 'utf-8');
-
-    // Write the template content to the INI file
     fs.writeFileSync(iniFilePath, templateContent);
-
     console.log(`[APP] [INI] Template copied to ${iniFilePath}`);
   } else {
     console.log(`[APP] [INI] File ${iniFilePath} already exists.`);
   }
 
-  // Load the INI file using the ini module
   const config = ini.parse(fs.readFileSync(iniFilePath, 'utf-8'));
-  const defaultCfg = ini.parse(fs.readFileSync(templateFilePath, 'utf-8'));
+  const defaultCfg = ini.parse(templateContent);
   console.log('[APP] [INI] INI file loaded!');
 
   return { newCfg: config, defaultCfg };
