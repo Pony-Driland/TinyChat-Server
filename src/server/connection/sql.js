@@ -235,6 +235,22 @@ export const startDatabase = async (appStorage) => {
 
     // Complete
     console.log(`[APP] [${config.database.type}] Database connection opened.`);
+
+    // Warn when the database still has uppercase user ids. The migration is
+    // not automatic because it rewrites primary keys, which must be done
+    // with the server stopped.
+    const users = db.getTable('users');
+    const all = await users.search({});
+    const rows = Array.isArray(all) ? all : all.items || [];
+    const pending = rows.filter((user) => user.userId !== user.userId.toLowerCase());
+
+    if (pending.length > 0) {
+      console.warn(
+        `[APP] [WARNING] ${pending.length} user id(s) are not lowercase. ` +
+          'Run "tiny-chat-archive migrate-usernames" to fix them.',
+      );
+    }
+
     return true;
   } catch (err) {
     console.error(err);

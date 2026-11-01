@@ -31,14 +31,26 @@ export function mapToArray(map) {
 
 /**
  * Creates a new user account.
+ *
+ * The user id is always stored in lowercase. The database enforces this
+ * invariant (see the `migrate-usernames` CLI command), so the conversion
+ * here is a defense in depth: it keeps the write path consistent even if
+ * the caller forgets to normalize the input.
+ *
  * @param {string} userId - The user's unique ID.
  * @param {string} password - The user's password.
  * @param {string} nickname - The user's chosen nickname.
+ * @returns {Promise<void>}
  */
 export const createAccount = async (userId, password, nickname) => {
   const hashedPassword = getHashString(password.substring(0, getIniConfig('PASSWORD_SIZE')));
   const users = db.getTable('users');
-  await users.set(userId.substring(0, getIniConfig('USER_ID_SIZE')).replace(/ /g, ''), {
+  const normalizedId = userId
+    .substring(0, getIniConfig('USER_ID_SIZE'))
+    .replace(/ /g, '')
+    .toLowerCase();
+
+  await users.set(normalizedId, {
     password: hashedPassword,
     nickname: nickname.substring(0, getIniConfig('NICKNAME_SIZE')),
   });

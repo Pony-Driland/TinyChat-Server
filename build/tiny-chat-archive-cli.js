@@ -90,6 +90,7 @@ ${color.bold('COMMANDS')}
   rooms         List every room available in the database
   chapters      List every chapter of a room
   reset-password Reset the password of a user account
+  migrate-usernames  Lowercase every user id and every row that references it
 
 ${color.bold('OPTIONS')}
   -d, --data-dir <path>   Folder that contains config.ini and database.db
@@ -560,7 +561,90 @@ const createRepository = (adapter) => ({
   },
 
   async updatePassword(userId, hashedPassword) {
-    return adapter.run('UPDATE users SET password = ? WHERE userId = ?', [hashedPassword, userId]);
+    return adapter.run('UPDATE users SET password = ? WHERE LOWER(userId) = LOWER(?)', [
+      hashedPassword,
+      userId,
+    ]);
+  },
+
+  async listUppercaseUsers() {
+    return adapter.all(
+      'SELECT userId FROM users WHERE userId != LOWER(userId) ORDER BY userId ASC',
+      [],
+    );
+  },
+
+  async migrateUsernamesToLowercase() {
+    return adapter.transaction(async (tx) => {
+      const changes = (result) => result?.changes ?? result?.rowCount ?? 0;
+      const users = await tx.all('SELECT userId FROM users WHERE userId != LOWER(userId)', []);
+
+      // Detect collisions before touching anything.
+      const seen = new Map();
+      for (const { userId } of users) {
+        const lower = userId.toLowerCase();
+        if (seen.has(lower)) {
+          throw new Error(
+            `Cannot migrate: "${seen.get(lower)}" and "${userId}" both map to "${lower}".`,
+          );
+        }
+        seen.set(lower, userId);
+      }
+
+      const tables = {
+        users: 0,
+        usersDice: 0,
+        moderators: 0,
+        banned: 0,
+        rooms: 0,
+        roomModerators: 0,
+        roomBannedUsers: 0,
+        history: 0,
+        historyDeleted: 0,
+        diceHistory: 0,
+        audit: 0,
+      };
+
+      for (const { userId } of users) {
+        const lower = userId.toLowerCase();
+
+        tables.users += changes(
+          await tx.run('UPDATE users SET userId = ? WHERE userId = ?', [lower, userId]),
+        );
+        tables.usersDice += changes(
+          await tx.run('UPDATE usersDice SET userId = ? WHERE userId = ?', [lower, userId]),
+        );
+        tables.moderators += changes(
+          await tx.run('UPDATE moderators SET userId = ? WHERE userId = ?', [lower, userId]),
+        );
+        tables.banned += changes(
+          await tx.run('UPDATE banned SET userId = ? WHERE userId = ?', [lower, userId]),
+        );
+        tables.rooms += changes(
+          await tx.run('UPDATE rooms SET ownerId = ? WHERE ownerId = ?', [lower, userId]),
+        );
+        tables.roomModerators += changes(
+          await tx.run('UPDATE roomModerators SET userId = ? WHERE userId = ?', [lower, userId]),
+        );
+        tables.roomBannedUsers += changes(
+          await tx.run('UPDATE roomBannedUsers SET userId = ? WHERE userId = ?', [lower, userId]),
+        );
+        tables.history += changes(
+          await tx.run('UPDATE history SET userId = ? WHERE userId = ?', [lower, userId]),
+        );
+        tables.historyDeleted += changes(
+          await tx.run('UPDATE historyDeleted SET userId = ? WHERE userId = ?', [lower, userId]),
+        );
+        tables.diceHistory += changes(
+          await tx.run('UPDATE diceHistory SET userId = ? WHERE userId = ?', [lower, userId]),
+        );
+        tables.audit += changes(
+          await tx.run('UPDATE audit SET userId = ? WHERE userId = ?', [lower, userId]),
+        );
+      }
+
+      return { migrated: users.length, tables };
+    });
   },
 });
 
@@ -988,6 +1072,47 @@ async function commandImport(repository, prompt, args) {
   log.success(`Import finished: ${inserted} inserted, ${updated} updated, ${skipped} skipped.`);
 }
 
+async function commandMigrateUsernames(repository, prompt, args) {
+  const pending = await repository.listUppercaseUsers();
+
+  if (pending.length === 0) {
+    log.success('Every user id is already lowercase. Nothing to do.');
+    return;
+  }
+
+  if (!args.json) {
+    console.log(`\n${color.bold(`${pending.length} user id(s) need to be lowercased:`)}\n`);
+    pending.forEach((user) => log.step(`${user.userId} -> ${user.userId.toLowerCase()}`));
+    console.log('');
+  }
+
+  if (args.dryRun) {
+    log.warn('[dry-run] Nothing was written to the database.');
+    return;
+  }
+
+  if (!args.yes && !args.json) {
+    const confirmed = await prompt.ask(
+      `\n${color.bold('>')} Apply the migration? ${color.dim('(y/N)')} `,
+    );
+    if (!['y', 'yes'].includes(confirmed.toLowerCase())) {
+      return log.warn('Migration cancelled.');
+    }
+  }
+
+  const result = await repository.migrateUsernamesToLowercase();
+
+  if (args.json) {
+    console.log(JSON.stringify({ success: true, ...result }, null, 2));
+    return;
+  }
+
+  log.success(`Migrated ${result.migrated} user id(s).`);
+  for (const [table, count] of Object.entries(result.tables)) {
+    if (count > 0) log.step(`${table}: ${count} row(s)`);
+  }
+}
+
 // -----------------------------------------------------------------------------
 // Entry point
 // -----------------------------------------------------------------------------
@@ -1001,7 +1126,11 @@ async function main() {
   const command = args._[0];
   if (!command) return console.log(HELP);
 
-  if (!['export', 'import', 'rooms', 'chapters', 'reset-password'].includes(command))
+  if (
+    !['export', 'import', 'rooms', 'chapters', 'reset-password', 'migrate-usernames'].includes(
+      command,
+    )
+  )
     throw new Error(`Unknown command: ${command}`);
 
   const dataDir = resolveDataDir(args.dataDir);
@@ -1023,6 +1152,8 @@ async function main() {
     else if (command === 'import') await commandImport(repository, prompt, args);
     else if (command === 'reset-password')
       await commandResetPassword(repository, prompt, args, config);
+    else if (command === 'migrate-usernames')
+      await commandMigrateUsernames(repository, prompt, args);
   } finally {
     prompt.close();
     await adapter.close();

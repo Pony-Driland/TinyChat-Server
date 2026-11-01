@@ -255,6 +255,13 @@ export default function userManager(socket, emitTo) {
     if (typeof userId !== 'string' || typeof password !== 'string' || typeof nickname !== 'string')
       return sendIncompleteDataInfo(fn);
 
+    if (userId !== userId.toLowerCase())
+      return fn({
+        error: true,
+        code: 5,
+        msg: 'User id must be lowercase.',
+      });
+
     // Check User
     if (userIsRateLimited(socket, fn, true)) return;
 
@@ -321,11 +328,13 @@ export default function userManager(socket, emitTo) {
 
     // Validate user credentials
     const users = db.getTable('users');
-    if (!(await users.has(userId))) {
+    const normalizedId = userId.toLowerCase();
+
+    if (!(await users.has(normalizedId))) {
       return fn({ error: true, msg: 'User does not exist.', code: 2 });
     }
 
-    const user = await users.get(userId);
+    const user = await users.get(normalizedId);
     const hashedPassword = getHashString(password);
     if (user.password !== hashedPassword) {
       return fn({ error: true, msg: 'Invalid user credentials.', code: 1 });
@@ -336,11 +345,11 @@ export default function userManager(socket, emitTo) {
 
     // Set session data
     userSession.check(socket);
-    userSession.setUserId(socket, userId);
+    userSession.setUserId(socket, normalizedId);
     userSession.setNickname(socket, nickname);
 
     // Add user into userSockets
-    userSockets.set(userId, socket);
+    userSockets.set(normalizedId, socket);
 
     // Success!
     console.log(
