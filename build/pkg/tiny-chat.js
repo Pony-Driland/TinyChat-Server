@@ -1,25 +1,37 @@
-const { execSync, spawnSync } = require('child_process');
+const { spawnSync } = require('child_process');
 const path = require('path');
 const { parseArgs } = require('node:util');
 const { compile } = require('nexe');
+const esbuild = require('esbuild');
 const fs = require('fs-extra');
 
 const config = {
   outputDir: 'dist',
   outputDirName: 'Tiny-RP-Chat',
   nodeModulesDir: 'node_modules',
-  babelSourceDir: 'src/server',
-  babelSourceDir2: 'src/proxy',
-  babelSourceDir3: 'src/api',
-  sourceFolderName: 'src',
   stagingDir: '.nexe-build', // Transient folder, never shipped.
 };
+
+/**
+ * Modules that must stay outside the bundle.
+ *
+ * Native bindings (`.node`) cannot be embedded by esbuild, so they are
+ * resolved at runtime from `node_modules/` next to the executable.
+ *
+ * @type {readonly string[]}
+ */
+const EXTERNAL_MODULES = Object.freeze([
+  'sqlite3', // Native binding, shipped next to the binary.
+  'pg', // Optional peer of puddysql.
+  'pg-native', // Optional native binding of pg.
+  'bufferutil', // Optional native binding of ws.
+  'utf-8-validate', // Optional native binding of ws.
+]);
 
 const projectRoot = path.resolve(__dirname, '../../');
 const buildOutputDir = `${config.outputDir}/${config.outputDirName}`;
 const buildOutputPath = path.join(projectRoot, buildOutputDir);
 const stagingPath = path.join(projectRoot, config.stagingDir);
-const stagingSrcPath = path.join(stagingPath, config.sourceFolderName);
 
 const PYTHON_CANDIDATES =
   process.platform === 'win32' ? ['python', 'python3'] : ['python3', 'python'];
@@ -203,27 +215,59 @@ const cleanupStaging = () => {
 };
 
 // ----------------------
-// Babel Transpile
+// esbuild Bundle
 // ----------------------
-const transpileWithBabel = () => {
-  console.log('🔨 Transpiling code with Babel...');
 
-  const env = { ...process.env };
-  Object.keys(env).forEach((key) => {
-    if (key.startsWith('npm_config_version_') || key === 'npm_config_argv') {
-      delete env[key];
-    }
-  });
-
-  const options = { stdio: 'inherit', env, cwd: projectRoot };
-  const babel = path.join(projectRoot, 'node_modules', '.bin', 'babel');
-
-  const sourceDirs = [config.babelSourceDir, config.babelSourceDir2, config.babelSourceDir3];
-
-  for (const sourceDir of sourceDirs) {
-    const outDir = path.join(stagingPath, sourceDir);
-    execSync(`"${babel}" "${sourceDir}" --out-dir "${outDir}" --copy-files`, options);
+/**
+ * Bundles one entry point into a single CommonJS file.
+ *
+ * @param {string} entryPoint Absolute path of the entry file.
+ * @param {string} outfile Absolute path of the output file.
+ * @returns {Promise<void>} Resolves when the bundle is written.
+ * @throws {TypeError} If `entryPoint` or `outfile` is not a non-empty string.
+ */
+const bundleEntry = async (entryPoint, outfile) => {
+  if (typeof entryPoint !== 'string' || entryPoint.length === 0) {
+    throw new TypeError('entryPoint must be a non-empty string.');
   }
+
+  if (typeof outfile !== 'string' || outfile.length === 0) {
+    throw new TypeError('outfile must be a non-empty string.');
+  }
+
+  await esbuild.build({
+    entryPoints: [entryPoint],
+    outfile,
+    bundle: true,
+    platform: 'node',
+    target: 'node20',
+    format: 'cjs',
+    minify: false,
+    keepNames: true,
+    sourcemap: false,
+    legalComments: 'none',
+    logLevel: 'info',
+    external: [...EXTERNAL_MODULES],
+  });
+};
+
+/**
+ * Bundles the server and the proxy with esbuild.
+ *
+ * @returns {Promise<void>} Resolves when both bundles are written.
+ */
+const bundleWithEsbuild = async () => {
+  console.log('🔨 Bundling code with esbuild...');
+
+  await bundleEntry(
+    path.join(projectRoot, 'src', 'server', 'index.js'),
+    path.join(stagingPath, 'server.cjs'),
+  );
+
+  await bundleEntry(
+    path.join(projectRoot, 'src', 'proxy', 'index.js'),
+    path.join(stagingPath, 'proxy.cjs'),
+  );
 };
 
 /**
@@ -318,13 +362,13 @@ const packageWithNexe = async (python) => {
 
   await compile({
     ...cfgBase,
-    input: path.join(stagingSrcPath, 'server', 'index.js'),
+    input: path.join(stagingPath, 'server.cjs'),
     output: path.join(buildOutputPath, 'tiny-chat'),
   });
 
   await compile({
     ...cfgBase,
-    input: path.join(stagingSrcPath, 'proxy', 'index.js'),
+    input: path.join(stagingPath, 'proxy.cjs'),
     output: path.join(buildOutputPath, 'tiny-chat-proxy'),
   });
 };
@@ -351,7 +395,7 @@ const buildApp = async () => {
   console.log(`   - Python: ${python.command}`);
 
   clearDistFolder();
-  transpileWithBabel();
+  await bundleWithEsbuild();
   copyConfigTemplates();
   await packageWithNexe(python);
   copySqlite3Modules();
