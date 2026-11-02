@@ -1,4 +1,4 @@
 {
-    "presets": ["@babel/preset-env"],
-    "plugins": ["./build/babel-plugin-ini-text.js"]
+  "presets": ["@babel/preset-env"],
+  "plugins": ["./build/babel-plugin-ini-text.js"]
 }

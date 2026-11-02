@@ -4,6 +4,7 @@ import {
   userSession,
   createAccount,
   getHashString,
+  findUser,
   roomUsers,
   userSockets,
   sendIncompleteDataInfo,
@@ -322,19 +323,22 @@ export default function userManager(socket, emitTo) {
       return fn({ error: true, msg: "You're already logged in!", code: 4 });
     }
 
-    if (userSockets.has(userId)) {
-      return fn({ error: true, msg: 'The account is already in use.', code: 3 });
-    }
-
     // Validate user credentials
     const users = db.getTable('users');
-    const normalizedId = userId.toLowerCase();
 
-    if (!(await users.has(normalizedId))) {
+    // Accounts created before the lowercase migration may still be stored with
+    // uppercase characters, so the lookup must not depend on the id casing.
+    const user = await findUser(users, userId);
+    if (!user) {
       return fn({ error: true, msg: 'User does not exist.', code: 2 });
     }
 
-    const user = await users.get(normalizedId);
+    const storedId = user.userId;
+
+    if (userSockets.has(storedId)) {
+      return fn({ error: true, msg: 'The account is already in use.', code: 3 });
+    }
+
     const hashedPassword = getHashString(password);
     if (user.password !== hashedPassword) {
       return fn({ error: true, msg: 'Invalid user credentials.', code: 1 });
@@ -345,11 +349,11 @@ export default function userManager(socket, emitTo) {
 
     // Set session data
     userSession.check(socket);
-    userSession.setUserId(socket, normalizedId);
+    userSession.setUserId(socket, storedId);
     userSession.setNickname(socket, nickname);
 
     // Add user into userSockets
-    userSockets.set(normalizedId, socket);
+    userSockets.set(storedId, socket);
 
     // Success!
     console.log(
@@ -360,12 +364,12 @@ export default function userManager(socket, emitTo) {
     const moderators = db.getTable('moderators');
     const usersDice = db.getTable('usersDice');
     fn({
-      userId,
+      userId: storedId,
       nickname,
-      isAdmin: userId === getIniConfig('OWNER_ID'),
-      isMod: await moderators.has(userId),
+      isAdmin: storedId === getIniConfig('OWNER_ID'),
+      isMod: await moderators.has(storedId),
       ratelimit: getRateLimit(),
-      dice: await usersDice.get(userId),
+      dice: await usersDice.get(storedId),
     });
   });
 

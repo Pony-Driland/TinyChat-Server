@@ -24,6 +24,31 @@ export const roomUsers = new Map(); // Stores room users
 // Hashed String
 export const getHashString = (text) => createHash('sha256').update(text).digest('hex');
 
+/**
+ * Finds a user by id, ignoring the id casing.
+ *
+ * Accounts created before the lowercase migration can still be stored with
+ * uppercase characters, so looking up only the lowercase id makes the login
+ * fail with "User does not exist" even when the credentials are correct.
+ *
+ * @param {import('puddysql').PuddySqlQuery} users - The users table.
+ * @param {string} userId - The id typed by the user.
+ * @returns {Promise<Record<string, any> | null>} The stored user or null.
+ */
+export const findUser = async (users, userId) => {
+  // Fast path: the id is already stored exactly as typed.
+  const user = await users.get(userId);
+  if (user) return user;
+
+  // Slow path: legacy rows may have a different casing.
+  const rows = await users.search({
+    q: { column: 'userId', operator: 'LOWER', value: userId.toLowerCase() },
+    limit: 1,
+  });
+
+  return Array.isArray(rows) && rows.length > 0 ? rows[0] : null;
+};
+
 // Map to Array
 export function mapToArray(map) {
   return map.size > 0 ? Array.from(map) : [];
