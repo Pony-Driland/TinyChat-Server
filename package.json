@@ -34,7 +34,7 @@
         "socket.io": "^4.8.3",
         "socket.io-client": "^4.8.3",
         "sqlite3": "^6.0.1",
-        "tiny-essentials": "^1.28.19",
+        "tiny-essentials": "^1.29.3",
         "tiny-server-essentials": "^1.1.0"
     },
     "devDependencies": {

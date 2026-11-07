@@ -560,6 +560,13 @@ const createRepository = (adapter) => ({
     );
   },
 
+  async findUser(userId) {
+    const rows = await adapter.all('SELECT * FROM users WHERE LOWER(userId) = LOWER(?) LIMIT 1', [
+      userId,
+    ]);
+    return rows.length > 0 ? rows[0] : null;
+  },
+
   async updatePassword(userId, hashedPassword) {
     return adapter.run('UPDATE users SET password = ? WHERE LOWER(userId) = LOWER(?)', [
       hashedPassword,
@@ -1070,6 +1077,81 @@ async function commandImport(repository, prompt, args) {
   }
 
   log.success(`Import finished: ${inserted} inserted, ${updated} updated, ${skipped} skipped.`);
+}
+
+/**
+ * Reads a numeric limit from the config, falling back to the server default.
+ *
+ * @param {any} config
+ * @param {string} key
+ * @param {number} fallback
+ */
+function getLimit(config, key, fallback) {
+  const limits = (config && config.limits) || {};
+  // The ini parser keeps inline comments, so `PASSWORD_SIZE = 200; max` is valid.
+  const value = parseInt(String(limits[key] ?? ''), 10);
+  return Number.isFinite(value) && value > 0 ? value : fallback;
+}
+
+/** Generates a random password that is safe to print in a terminal. */
+function generatePassword(length = 24) {
+  const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789';
+  const bytes = crypto.randomBytes(length);
+  let password = '';
+  for (let i = 0; i < length; i++) password += alphabet[bytes[i] % alphabet.length];
+  return password;
+}
+
+async function commandResetPassword(repository, prompt, args, config) {
+  let userId = args.user;
+
+  if (!userId) {
+    if (args.json) throw new Error('You must provide the user with --user <id>.');
+    userId = await prompt.ask(`\n${color.bold('User id:')} `);
+    if (!userId) throw new Error('No user id provided. Aborting.');
+  }
+
+  const user = await repository.findUser(userId);
+  if (!user) throw new Error(`User not found: ${userId}`);
+
+  const passwordSize = getLimit(config, 'PASSWORD_SIZE', 200);
+  const minPasswordSize = getLimit(config, 'MIN_PASSWORD_SIZE', 15);
+
+  const generated = typeof args.password !== 'string';
+  const password = generated ? generatePassword() : args.password;
+
+  if (password.length < minPasswordSize)
+    throw new Error(`The password must have at least ${minPasswordSize} characters.`);
+
+  // Mirrors `getHashString(password.substring(0, PASSWORD_SIZE))` from the server.
+  const hashedPassword = crypto
+    .createHash('sha256')
+    .update(password.substring(0, passwordSize))
+    .digest('hex');
+
+  if (args.dryRun) {
+    log.warn(`[dry-run] Would reset the password of "${user.userId}".`);
+    return;
+  }
+
+  await repository.updatePassword(user.userId, hashedPassword);
+
+  if (args.json) {
+    console.log(
+      JSON.stringify(
+        { success: true, userId: user.userId, password: generated ? password : undefined },
+        null,
+        2,
+      ),
+    );
+    return;
+  }
+
+  log.success(`Password of ${color.bold(user.userId)} updated.`);
+  if (generated) {
+    log.warn('Store this password now, it will not be shown again:');
+    console.log(`\n  ${color.bold(password)}\n`);
+  }
 }
 
 async function commandMigrateUsernames(repository, prompt, args) {
