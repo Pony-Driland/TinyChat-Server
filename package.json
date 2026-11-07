@@ -31,7 +31,7 @@
         "ini": "^5.0.0",
         "pg": "^8.23.1",
         "puddysql": "^1.0.0-beta-9",
-        "socket.io": "^4.8.3",
+        "socket.io": "^4.8.4",
         "socket.io-client": "^4.8.3",
         "sqlite3": "^6.0.1",
         "tiny-essentials": "^1.29.3",
