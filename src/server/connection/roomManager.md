@@ -681,3 +681,56 @@ socket.emit(
   },
 );
 ```
+
+---
+
+## Room permissions (read-only guests)
+
+Every user that joins a room starts as a **guest** (`role: "guest"`), which means
+read-only mode. The room owner must explicitly grant the permission to talk.
+
+### Roles
+
+| Role        | Can talk | How it is granted                                     |
+| ----------- | -------- | ----------------------------------------------------- |
+| `owner`     | ✅       | Room owner or server owner.                           |
+| `moderator` | ✅       | Server moderator or room moderator.                   |
+| `member`    | ✅       | Explicitly granted with `room-grant-permission`.      |
+| `guest`     | ❌       | Default for every user that joins the room.           |
+
+### `room-grant-permission`
+
+Grants the permission to send messages. Only the room owner or the server owner
+can call it.
+
+```json
+{ "roomId": "lobby", "userIds": ["bob"] }
+```
+
+### `room-revoke-permission`
+
+Revokes the permission to send messages. Only the room owner or the server owner
+can call it.
+
+```json
+{ "roomId": "lobby", "userIds": ["bob"] }
+```
+
+### `room-permissions`
+
+Returns the caller role plus the list of users allowed to talk in the room.
+
+```json
+{ "success": true, "role": "guest", "permissions": [], "roles": { "GUEST": "guest" } }
+```
+
+### Events emitted
+
+| Event                      | Description                                                      |
+| -------------------------- | ---------------------------------------------------------------- |
+| `room-permission-updated`  | Sent to the room when someone is granted or revoked.             |
+
+### `room-entered` payload
+
+The payload includes the caller `role` and the current `permissions` list, so
+the client can render a read-only warning instead of the message box.

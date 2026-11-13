@@ -13,6 +13,7 @@ import {
   userMsgEditIsRateLimited,
   userMsgDeleteIsRateLimited,
   userMsgLoadIsRateLimited,
+  canSpeakInRoom,
 } from './values';
 
 /**
@@ -57,6 +58,15 @@ export default function messageManager(socket, socketTo) {
     const rUsers = roomUsers.get(roomId);
     if (!rUsers || !rUsers.get(userId))
       return fn({ error: true, code: 3, msg: 'You are not in this room.' });
+
+    // Every new user joins as a read-only guest. The room owner must grant the
+    // permission before the user is allowed to send messages.
+    if (!(await canSpeakInRoom(roomId, userId, room)))
+      return fn({
+        error: true,
+        msg: 'You are in read-only mode. Wait for the room owner to allow you to send messages.',
+        code: 5,
+      });
 
     const moderators = db.getTable('moderators');
     const roomModerators = db.getTable('roomModerators');
@@ -173,6 +183,14 @@ export default function messageManager(socket, socketTo) {
         code: 5,
       });
 
+    // A user that lost the permission to talk also loses the permission to edit.
+    if (msg.userId === userId && !(await canSpeakInRoom(roomId, userId, room)))
+      return fn({
+        error: true,
+        msg: 'You are in read-only mode. Wait for the room owner to allow you to send messages.',
+        code: 6,
+      });
+
     // Edit message
     const msgDate = Date.now();
     msg.text = newText;
@@ -251,6 +269,14 @@ export default function messageManager(socket, socketTo) {
         error: true,
         msg: `You don't have enough permissions.`,
         code: 4,
+      });
+
+    // A read-only guest cannot delete messages, not even their own.
+    if (msg.userId === userId && !(await canSpeakInRoom(roomId, userId, room)))
+      return fn({
+        error: true,
+        msg: 'You are in read-only mode. Wait for the room owner to allow you to send messages.',
+        code: 5,
       });
 
     // Delete message
@@ -590,6 +616,14 @@ export default function messageManager(socket, socketTo) {
 
     // You need join the room
     if (!rUsers.get(userId)) return fn({ error: true, code: 2, msg: 'You are not in this room.' });
+
+    // Rolling dice is a way of talking, so read-only guests cannot do it.
+    if (!(await canSpeakInRoom(roomId, userId)))
+      return fn({
+        error: true,
+        msg: 'You are in read-only mode. Wait for the room owner to allow you to roll the dice.',
+        code: 4,
+      });
 
     // Dice skin
     const skin = getDiceData(diceSkin);

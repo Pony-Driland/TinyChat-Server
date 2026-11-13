@@ -133,6 +133,117 @@ export const userSession = {
   },
 };
 
+/**
+ * Roles that can be granted to a user inside a room.
+ *
+ * - `owner`: the room owner (or the server owner).
+ * - `moderator`: a room moderator or a server moderator.
+ * - `member`: a regular user that received the permission to talk.
+ * - `guest`: read-only visitor. This is the default for every new user.
+ */
+export const ROOM_ROLES = {
+  OWNER: 'owner',
+  MODERATOR: 'moderator',
+  MEMBER: 'member',
+  GUEST: 'guest',
+};
+
+/**
+ * Resolves the role of an user inside a room.
+ *
+ * @param {string} roomId - The room id.
+ * @param {string} userId - The user id.
+ * @param {{ ownerId?: string }} [room] - The room row, when already loaded.
+ * @returns {Promise<'owner'|'moderator'|'member'|'guest'>}
+ */
+export const getRoomRole = async (roomId, userId, room) => {
+  if (typeof roomId !== 'string' || typeof userId !== 'string') return ROOM_ROLES.GUEST;
+
+  const roomRow = room ?? (await db.getTable('rooms').get(roomId));
+  if (!roomRow) return ROOM_ROLES.GUEST;
+
+  // Server owner and room owner have full control over the room.
+  if (userId === getIniConfig('OWNER_ID') || userId === roomRow.ownerId) return ROOM_ROLES.OWNER;
+
+  // Server moderators and room moderators can moderate the room.
+  const moderators = db.getTable('moderators');
+  if (await moderators.has(userId)) return ROOM_ROLES.MODERATOR;
+
+  const roomModerators = db.getTable('roomModerators');
+  if (await roomModerators.has(roomId, userId)) return ROOM_ROLES.MODERATOR;
+
+  // Users explicitly allowed by the room owner.
+  const roomPermissions = db.getTable('roomPermissions');
+  if (await roomPermissions.has(roomId, userId)) return ROOM_ROLES.MEMBER;
+
+  return ROOM_ROLES.GUEST;
+};
+
+/**
+ * Checks if an user is allowed to send messages in a room.
+ *
+ * Every user joins the room as a read-only guest. The room owner needs to
+ * grant the permission before the user can talk.
+ *
+ * @param {string} roomId - The room id.
+ * @param {string} userId - The user id.
+ * @param {{ ownerId?: string }} [room] - The room row, when already loaded.
+ * @returns {Promise<boolean>}
+ */
+export const canSpeakInRoom = async (roomId, userId, room) => {
+  const role = await getRoomRole(roomId, userId, room);
+  return role !== ROOM_ROLES.GUEST;
+};
+
+/**
+ * Grants the permission to speak in a room.
+ *
+ * @param {string} roomId - The room id.
+ * @param {string} userId - The user that received the permission.
+ * @param {string} [grantedBy] - The user that granted the permission.
+ * @returns {Promise<void>}
+ */
+export const grantRoomPermission = async (roomId, userId, grantedBy) => {
+  const roomPermissions = db.getTable('roomPermissions');
+  await roomPermissions.set(roomId, {
+    userId,
+    grantedBy: typeof grantedBy === 'string' ? grantedBy : null,
+    date: Date.now(),
+  });
+};
+
+/**
+ * Revokes the permission to speak in a room.
+ *
+ * @param {string} roomId - The room id.
+ * @param {string} userId - The user that lost the permission.
+ * @returns {Promise<void>}
+ */
+export const revokeRoomPermission = async (roomId, userId) => {
+  const roomPermissions = db.getTable('roomPermissions');
+  if (await roomPermissions.has(roomId, userId)) await roomPermissions.delete(roomId, userId);
+};
+
+/**
+ * Lists the users that received the permission to speak in a room.
+ *
+ * @param {string} roomId - The room id.
+ * @returns {Promise<Array<{ userId: string, grantedBy: string|null, date: number }>>}
+ */
+export const listRoomPermissions = async (roomId) => {
+  const roomPermissions = db.getTable('roomPermissions');
+  const rows = await roomPermissions.search({
+    q: { group: 'AND', conditions: [{ column: 'roomId', value: roomId }] },
+  });
+
+  const items = Array.isArray(rows) ? rows : (rows?.items ?? []);
+  return items.map((item) => ({
+    userId: item.userId,
+    grantedBy: typeof item.grantedBy === 'string' ? item.grantedBy : null,
+    date: typeof item.date === 'number' ? item.date : 0,
+  }));
+};
+
 export const getRateLimit = () => ({
   size: {
     history: getIniConfig('HISTORY_SIZE'),
@@ -181,10 +292,10 @@ const rateLimits = new Map();
 export const createRateLimit = (limitCountName = '', itemName = 'items', code = -1) => {
   // Track the events for rate limiting
   return (socket, fn, isUnknown = false) => {
-    const cfg = { 
+    const cfg = {
       cleanupInterval: 1000,
       maxIdle: getIniConfig('RATE_LIMIT_TIME'),
-      maxHits: getIniConfig(limitCountName) || 5
+      maxHits: getIniConfig(limitCountName) || 5,
     };
 
     let rateLimit = rateLimits.get(limitCountName);
@@ -192,7 +303,7 @@ export const createRateLimit = (limitCountName = '', itemName = 'items', code = 
       rateLimit = new TinyRateLimiter(cfg);
       rateLimits.set(limitCountName, rateLimit);
     }
-    
+
     /** @type {number} */
     const limitCount = cfg.maxHits;
 

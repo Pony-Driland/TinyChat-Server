@@ -11,8 +11,7 @@ export const startDatabase = async (appStorage) => {
     console.log(`[APP] [${config.database.type}] Starting database...`);
 
     // Sqlite3
-    if (config.database.type === 'sqlite3')
-      await db.initSqlite3(join(appDir(), `./database.db`));
+    if (config.database.type === 'sqlite3') await db.initSqlite3(join(appDir(), `./database.db`));
     // Postgre
     else if (config.database.type === 'postgre')
       await db.initPostgre({
@@ -97,6 +96,19 @@ export const startDatabase = async (appStorage) => {
     await db.initTable({ name: 'roomBannedUsers', id: 'roomId', subId: 'userId' }, [
       ['roomId', 'TEXT'],
       ['userId', 'TEXT'],
+      ['PRIMARY KEY (roomId, userId)'],
+      ['FOREIGN KEY (roomId) REFERENCES rooms(roomId) ON DELETE CASCADE'],
+    ]);
+
+    // Stores the users allowed to speak in a room.
+    // Every user that joins a room is a read-only guest until the room owner
+    // (or a moderator) grants the permission to send messages.
+    console.log(`[APP] [${config.database.type}] [table] Loading room permissions...`);
+    await db.initTable({ name: 'roomPermissions', id: 'roomId', subId: 'userId' }, [
+      ['roomId', 'TEXT'],
+      ['userId', 'TEXT'],
+      ['grantedBy', 'TEXT'],
+      ['date', 'INTEGER'],
       ['PRIMARY KEY (roomId, userId)'],
       ['FOREIGN KEY (roomId) REFERENCES rooms(roomId) ON DELETE CASCADE'],
     ]);

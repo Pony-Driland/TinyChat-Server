@@ -17,6 +17,11 @@ import {
   noDataInfo,
   getJoinData,
   roomUpdateIsRateLimited,
+  getRoomRole,
+  grantRoomPermission,
+  revokeRoomPermission,
+  listRoomPermissions,
+  ROOM_ROLES,
 } from './values';
 
 /**
@@ -109,12 +114,16 @@ export default function roomManager(socket, emitTo, socketTo, socketEmit) {
       roomId,
       users,
       mods: (await roomModerators.getAll()) ?? [],
-      rpgSchema: ((await rpgSchema.get(roomId))?.data) ?? {},
+      rpgSchema: (await rpgSchema.get(roomId))?.data ?? {},
       roomData: (await roomData.get(roomId))?.data ?? {},
       roomPrivateData:
         userId === room.ownerId || userId === getIniConfig('OWNER_ID')
           ? (await privateRoomData.get(roomId))?.data || {}
           : {},
+      // The role decides if the client renders the message box or a
+      // read-only warning. New users always start as `guest`.
+      role: await getRoomRole(roomId, userId, room),
+      permissions: await listRoomPermissions(roomId),
       data: room ?? {},
     });
 
@@ -196,6 +205,9 @@ export default function roomManager(socket, emitTo, socketTo, socketEmit) {
     // Add into the ban list
     const roomBannedUsers = db.getTable('roomBannedUsers');
     await roomBannedUsers.set(roomId, { userId });
+
+    // A banned user must lose the permission to talk in the room.
+    await revokeRoomPermission(roomId, userId);
 
     // Remove the user from their room
     emitTo(roomId, 'user-banned', { roomId, userId });
@@ -705,6 +717,112 @@ export default function roomManager(socket, emitTo, socketTo, socketEmit) {
     fn({ success: true });
   });
 
+  socket.on('room-grant-permission', async (data, fn) => {
+    if (noDataInfo(data, fn)) return;
+    const { roomId, userIds } = data;
+    // Validate values
+    if (typeof roomId !== 'string' || !Array.isArray(userIds)) return sendIncompleteDataInfo(fn);
+
+    // Get user
+    const yourId = userSession.getUserId(socket);
+    if (!yourId) return accountNotDetected(fn); // Only logged-in users can update settings
+    if (roomUpdateIsRateLimited(socket, fn)) return;
+
+    // Get room
+    const rooms = db.getTable('rooms');
+    const room = await rooms.get(roomId);
+    if (!room) return fn({ error: true, msg: 'Room not found.', code: 1 });
+
+    // Only the room owner or the server owner can grant permissions.
+    if (yourId !== room.ownerId && yourId !== getIniConfig('OWNER_ID')) return ownerOnly(fn, 2);
+
+    // Grant the permission to every valid user.
+    const result = [];
+    for (const index in userIds) {
+      const userId = userIds[index];
+      if (typeof userId !== 'string' || userId.length < 1) continue;
+      await grantRoomPermission(roomId, userId, yourId);
+      result.push(userId);
+    }
+
+    // Notify all users in the room about the updated permissions.
+    if (result.length > 0)
+      emitTo(roomId, 'room-permission-updated', {
+        roomId,
+        type: 'grant',
+        users: result,
+        permissions: await listRoomPermissions(roomId),
+      });
+
+    // Complete
+    fn({ success: true, users: result });
+  });
+
+  socket.on('room-revoke-permission', async (data, fn) => {
+    if (noDataInfo(data, fn)) return;
+    const { roomId, userIds } = data;
+    // Validate values
+    if (typeof roomId !== 'string' || !Array.isArray(userIds)) return sendIncompleteDataInfo(fn);
+
+    // Get user
+    const yourId = userSession.getUserId(socket);
+    if (!yourId) return accountNotDetected(fn); // Only logged-in users can update settings
+    if (roomUpdateIsRateLimited(socket, fn)) return;
+
+    // Get room
+    const rooms = db.getTable('rooms');
+    const room = await rooms.get(roomId);
+    if (!room) return fn({ error: true, msg: 'Room not found.', code: 1 });
+
+    // Only the room owner or the server owner can revoke permissions.
+    if (yourId !== room.ownerId && yourId !== getIniConfig('OWNER_ID')) return ownerOnly(fn, 2);
+
+    // Revoke the permission from every valid user.
+    const result = [];
+    for (const index in userIds) {
+      const userId = userIds[index];
+      if (typeof userId !== 'string' || userId.length < 1) continue;
+      await revokeRoomPermission(roomId, userId);
+      result.push(userId);
+    }
+
+    // Notify all users in the room about the updated permissions.
+    if (result.length > 0)
+      emitTo(roomId, 'room-permission-updated', {
+        roomId,
+        type: 'revoke',
+        users: result,
+        permissions: await listRoomPermissions(roomId),
+      });
+
+    // Complete
+    fn({ success: true, users: result });
+  });
+
+  socket.on('room-permissions', async (data, fn) => {
+    if (noDataInfo(data, fn)) return;
+    const { roomId } = data;
+    // Validate values
+    if (typeof roomId !== 'string') return sendIncompleteDataInfo(fn);
+
+    // Get user
+    const userId = userSession.getUserId(socket);
+    if (!userId) return accountNotDetected(fn);
+
+    // Get room
+    const rooms = db.getTable('rooms');
+    const room = await rooms.get(roomId);
+    if (!room) return fn({ error: true, msg: 'Room not found.', code: 1 });
+
+    // Complete
+    fn({
+      success: true,
+      role: await getRoomRole(roomId, userId, room),
+      permissions: await listRoomPermissions(roomId),
+      roles: ROOM_ROLES,
+    });
+  });
+
   socket.on('update-room', async (data, fn) => {
     if (noDataInfo(data, fn)) return;
     const { roomId, newSettings } = data;
@@ -891,8 +1009,7 @@ export default function roomManager(socket, emitTo, socketTo, socketEmit) {
     if (noDataInfo(data, fn)) return;
     const { roomId, values } = data;
     // Validate values
-    if (typeof roomId !== 'string' || !isJsonObject(values))
-      return sendIncompleteDataInfo(fn);
+    if (typeof roomId !== 'string' || !isJsonObject(values)) return sendIncompleteDataInfo(fn);
 
     // Get user
     const userId = userSession.getUserId(socket);
