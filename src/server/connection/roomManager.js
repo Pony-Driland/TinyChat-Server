@@ -262,6 +262,56 @@ export default function roomManager(socket, emitTo, socketTo, socketEmit) {
     });
   });
 
+  /**
+   * Lists the users banned from a room.
+   *
+   * Only the room owner, the room moderators and the server staff can see it.
+   */
+  socket.on('list-room-banned', async (data, fn) => {
+    if (noDataInfo(data, fn)) return;
+    const { roomId } = data;
+    // Validate values
+    if (typeof roomId !== 'string') return sendIncompleteDataInfo(fn);
+
+    // Get user
+    const userId = userSession.getUserId(socket);
+    if (!userId) return accountNotDetected(fn);
+    if (userLoadIsRateLimited(socket, fn)) return;
+
+    // Check if the room exists
+    const rooms = db.getTable('rooms');
+    const room = await rooms.get(roomId);
+    if (!room) return fn({ error: true, msg: 'Room not found.', code: 1 });
+
+    // Only the room staff can see the ban list
+    const moderators = db.getTable('moderators');
+    const roomModerators = db.getTable('roomModerators');
+    const isRoomStaff =
+      userId === getIniConfig('OWNER_ID') ||
+      room.ownerId === userId ||
+      (await moderators.has(userId)) ||
+      (await roomModerators.has(roomId, userId));
+    if (!isRoomStaff) return ownerOnly(fn, 2);
+
+    // Load the bans
+    const roomBannedUsers = db.getTable('roomBannedUsers');
+    const rows = await roomBannedUsers.search({
+      q: { group: 'AND', conditions: [{ column: 'roomId', value: roomId }] },
+    });
+    const list = Array.isArray(rows) ? rows : (rows?.items ?? []);
+
+    fn({
+      success: true,
+      users: list
+        .filter((item) => typeof item?.userId === 'string')
+        .map((item) => ({
+          userId: item.userId,
+          reason: typeof item.reason === 'string' ? item.reason : null,
+          date: typeof item.date === 'number' ? item.date : null,
+        })),
+    });
+  });
+
   socket.on('join', async (data, fn) => {
     if (noDataInfo(data, fn)) return;
     const { roomId, password } = data;
