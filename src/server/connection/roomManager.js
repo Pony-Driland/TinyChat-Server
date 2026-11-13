@@ -173,43 +173,93 @@ export default function roomManager(socket, emitTo, socketTo, socketEmit) {
   });
 
   /**
-   * Lists the users currently connected to the server.
+   * Lists the accounts of the server.
    *
-   * Only the server staff can see the full list.
+   * By default only the online users are returned. The staff can search every
+   * account and/or only the banned ones.
    */
   socket.on('list-users', async (data, fn) => {
     if (noDataInfo(data, fn)) return;
-    const { search } = data;
+    const { search, all, bannedOnly, page, perPage } = data;
 
     // Validate values
-    if (typeof search !== 'string' && search !== null) return sendIncompleteDataInfo(fn);
+    if (
+      (typeof search !== 'string' && search !== null) ||
+      typeof all !== 'boolean' ||
+      typeof bannedOnly !== 'boolean' ||
+      typeof page !== 'number' ||
+      page < 1 ||
+      typeof perPage !== 'number' ||
+      perPage < 1
+    )
+      return sendIncompleteDataInfo(fn);
 
     // Get user
     const userId = userSession.getUserId(socket);
     if (!userId) return accountNotDetected(fn);
     if (userLoadIsRateLimited(socket, fn)) return;
 
-    // Only the server staff can list the online users.
+    // Only the server staff can list the accounts.
     const moderators = db.getTable('moderators');
     const isStaff = userId === getIniConfig('OWNER_ID') || (await moderators.has(userId));
     if (!isStaff) return ownerOnly(fn, 2);
 
     const users = db.getTable('users');
+    const banned = db.getTable('banned');
     const query = typeof search === 'string' ? search.trim().toLowerCase() : '';
-    const list = [];
 
-    for (const [onlineId, onlineSocket] of userSockets) {
-      if (query.length > 0 && onlineId.toLowerCase().indexOf(query) < 0) continue;
-      const user = await users.get(onlineId);
+    // Source of the account list: every account or only the online ones.
+    let accounts;
+    if (all) {
+      const rows = await users.getAll();
+      accounts = (Array.isArray(rows) ? rows : []).map((row) => ({
+        userId: row.userId,
+        nickname: typeof row.nickname === 'string' ? row.nickname : null,
+      }));
+    } else {
+      accounts = [];
+      for (const [onlineId, onlineSocket] of userSockets) {
+        const user = await users.get(onlineId);
+        accounts.push({
+          userId: onlineId,
+          nickname: typeof user?.nickname === 'string' ? user.nickname : null,
+          rooms: Array.isArray(onlineSocket?.data?.rooms) ? [...onlineSocket.data.rooms] : [],
+        });
+      }
+    }
+
+    const list = [];
+    for (const account of accounts) {
+      if (query.length > 0 && account.userId.toLowerCase().indexOf(query) < 0) continue;
+
+      const banData = await banned.get(account.userId);
+      const isBanned = Boolean(banData);
+      if (bannedOnly && !isBanned) continue;
+
+      const onlineSocket = userSockets.get(account.userId);
       list.push({
-        userId: onlineId,
-        nickname: typeof user?.nickname === 'string' ? user.nickname : null,
-        rooms: Array.isArray(onlineSocket?.data?.rooms) ? [...onlineSocket.data.rooms] : [],
+        userId: account.userId,
+        nickname: account.nickname,
+        online: Boolean(onlineSocket),
+        rooms: account.rooms ?? (onlineSocket?.data?.rooms ? [...onlineSocket.data.rooms] : []),
+        banned: isBanned,
+        banReason: typeof banData?.reason === 'string' ? banData.reason : null,
+        isMod: await moderators.has(account.userId),
+        isOwner: account.userId === getIniConfig('OWNER_ID'),
       });
     }
 
     list.sort((a, b) => a.userId.localeCompare(b.userId));
-    fn({ success: true, users: list });
+
+    const totalPages = Math.max(1, Math.ceil(list.length / perPage));
+    const start = (page - 1) * perPage;
+
+    fn({
+      success: true,
+      users: list.slice(start, start + perPage),
+      page,
+      totalPages,
+    });
   });
 
   socket.on('join', async (data, fn) => {

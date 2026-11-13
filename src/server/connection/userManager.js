@@ -73,6 +73,63 @@ export default function userManager(socket, emitTo) {
     fn({ result: userId === getIniConfig('OWNER_ID') });
   });
 
+  /**
+   * Promotes an account to server staff.
+   *
+   * Only the server owner can promote or demote the staff.
+   */
+  socket.on('add-mod', async (data, fn) => {
+    if (noDataInfo(data, fn)) return;
+    const { userId } = data;
+    // Validate values
+    if (typeof userId !== 'string') return sendIncompleteDataInfo(fn);
+
+    // Get user
+    const yourId = userSession.getUserId(socket);
+    if (!yourId) return accountNotDetected(fn);
+    if (userIsRateLimited(socket, fn)) return;
+
+    // Only the server owner can promote accounts.
+    if (yourId !== getIniConfig('OWNER_ID')) return ownerOnly(fn, 1);
+
+    // Check if user exists
+    const users = db.getTable('users');
+    if (!(await users.has(userId))) {
+      return fn({ error: true, msg: 'User not found.', code: 2 });
+    }
+
+    // Add into the staff list
+    const moderators = db.getTable('moderators');
+    if (!(await moderators.has(userId)))
+      await moderators.set(userId, { date: Date.now() });
+
+    fn({ success: true });
+  });
+
+  /**
+   * Removes the server staff from an account.
+   */
+  socket.on('remove-mod', async (data, fn) => {
+    if (noDataInfo(data, fn)) return;
+    const { userId } = data;
+    // Validate values
+    if (typeof userId !== 'string') return sendIncompleteDataInfo(fn);
+
+    // Get user
+    const yourId = userSession.getUserId(socket);
+    if (!yourId) return accountNotDetected(fn);
+    if (userIsRateLimited(socket, fn)) return;
+
+    // Only the server owner can demote accounts.
+    if (yourId !== getIniConfig('OWNER_ID')) return ownerOnly(fn, 1);
+
+    // Remove from the staff list
+    const moderators = db.getTable('moderators');
+    if (await moderators.has(userId)) await moderators.delete(userId);
+
+    fn({ success: true });
+  });
+
   socket.on('ban', async (data, fn) => {
     if (noDataInfo(data, fn)) return;
     const { userId, reason } = data;
