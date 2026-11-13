@@ -117,6 +117,7 @@ Deletes a message from the room history if the user has the necessary permission
 - `2`: You are not in this room.
 - `3`: Message not found.
 - `4`: User lacks permission.
+- `5`: You are in read-only mode (the permission to talk was not granted or was revoked).
 
 ---
 
@@ -165,6 +166,13 @@ Rolls one or more virtual dice in a chat room. Users can configure whether dice 
   ]
 }
 ```
+
+**Error Codes:**
+
+- `1`: Room not found.
+- `2`: You are not in this room.
+- `3`: Invalid dice configuration.
+- `4`: You are in read-only mode (the permission to talk was not granted or was revoked).
 
 **Broadcasted Event (`roll-result`):**
 
