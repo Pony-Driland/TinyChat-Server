@@ -311,9 +311,16 @@ export default function roomManager(socket, emitTo, socketTo, socketEmit) {
    */
   socket.on('list-room-banned', async (data, fn) => {
     if (noDataInfo(data, fn)) return;
-    const { roomId } = data;
+    const { roomId, page, perPage } = data;
     // Validate values
-    if (typeof roomId !== 'string') return sendIncompleteDataInfo(fn);
+    if (
+      typeof roomId !== 'string' ||
+      typeof page !== 'number' ||
+      page < 1 ||
+      typeof perPage !== 'number' ||
+      perPage < 1
+    )
+      return sendIncompleteDataInfo(fn);
 
     // Get user
     const userId = userSession.getUserId(socket);
@@ -342,15 +349,22 @@ export default function roomManager(socket, emitTo, socketTo, socketEmit) {
     });
     const list = Array.isArray(rows) ? rows : (rows?.items ?? []);
 
+    const users = list
+      .filter((item) => typeof item?.userId === 'string')
+      .map((item) => ({
+        userId: item.userId,
+        reason: typeof item.reason === 'string' ? item.reason : null,
+        date: typeof item.date === 'number' ? item.date : null,
+      }));
+
+    const totalPages = Math.max(1, Math.ceil(users.length / perPage));
+    const start = (page - 1) * perPage;
+
     fn({
       success: true,
-      users: list
-        .filter((item) => typeof item?.userId === 'string')
-        .map((item) => ({
-          userId: item.userId,
-          reason: typeof item.reason === 'string' ? item.reason : null,
-          date: typeof item.date === 'number' ? item.date : null,
-        })),
+      users: users.slice(start, start + perPage),
+      page,
+      totalPages,
     });
   });
 
