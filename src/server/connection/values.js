@@ -342,6 +342,7 @@ export const userMsgEditIsRateLimited = createRateLimit('MESSAGES_EDIT', 'messag
 export const userMsgIsRateLimited = createRateLimit('MESSAGES', 'messages', 2);
 export const userDiceIsRateLimited = createRateLimit('DICE_ROLLS', 'dice rolls', 3);
 export const userUpdateDiceIsRateLimited = createRateLimit('DICE_ROLLS', 'dice changes', 3);
+export const userLoadIsRateLimited = createRateLimit('MESSAGES_LOAD', 'listing requests', 7);
 
 // Incomplete data
 export const sendIncompleteDataInfo = (fn, code = 0) => {

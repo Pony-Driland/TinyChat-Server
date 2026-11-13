@@ -17,6 +17,7 @@ import {
   noDataInfo,
   getJoinData,
   roomUpdateIsRateLimited,
+  userLoadIsRateLimited,
   getRoomRole,
   grantRoomPermission,
   revokeRoomPermission,
@@ -47,6 +48,170 @@ export default function roomManager(socket, emitTo, socketTo, socketEmit) {
     fn({ exists: result });
   });
 
+  /**
+   * Lists the rooms the signed-in account is allowed to see.
+   *
+   * `scope` accepts:
+   * - `mine`: rooms owned by the account (default).
+   * - `visited`: rooms the account joined before.
+   * - `all`: every room of the server. Staff only.
+   *
+   * The list is ordered by the last message date, so the rooms with recent
+   * activity always come first.
+   */
+  socket.on('list-rooms', async (data, fn) => {
+    if (noDataInfo(data, fn)) return;
+    const { search, scope, openOnly, page, perPage } = data;
+
+    // Validate values
+    if (
+      (typeof search !== 'string' && search !== null) ||
+      (typeof scope !== 'string' && scope !== null) ||
+      typeof openOnly !== 'boolean' ||
+      typeof page !== 'number' ||
+      page < 1 ||
+      typeof perPage !== 'number' ||
+      perPage < 1
+    )
+      return sendIncompleteDataInfo(fn);
+
+    // Get user
+    const userId = userSession.getUserId(socket);
+    if (!userId) return accountNotDetected(fn);
+    if (userLoadIsRateLimited(socket, fn)) return;
+
+    // Only the server staff can list every room of the server.
+    const moderators = db.getTable('moderators');
+    const isStaff = userId === getIniConfig('OWNER_ID') || (await moderators.has(userId));
+    if (scope === 'all' && !isStaff) return ownerOnly(fn, 2);
+
+    // Every room the account already joined before.
+    const members = db.getTable('roomMembers');
+    const memberRows = await members.search({
+      q: { group: 'AND', conditions: [{ column: 'userId', value: userId }] },
+    });
+    const memberList = Array.isArray(memberRows) ? memberRows : (memberRows?.items ?? []);
+    const visitedIds = new Set(
+      memberList.map((item) => item.roomId).filter((item) => typeof item === 'string'),
+    );
+
+    // The room list is small enough to be filtered in memory, and doing it here
+    // keeps the nested OR/AND conditions out of the query builder.
+    const rooms = db.getTable('rooms');
+    const allRooms = await rooms.getAll();
+    const needle = typeof search === 'string' ? search.trim().toLowerCase() : '';
+    const canSeeAll = scope === 'all';
+
+    const roomsList = [];
+    for (const item of allRooms) {
+      if (typeof item?.roomId !== 'string') continue;
+
+      // A regular account only sees the rooms it owns or already joined.
+      if (!canSeeAll && item.ownerId !== userId && !visitedIds.has(item.roomId)) continue;
+
+      // The open/closed filter is applied here so the pagination stays correct.
+      if (openOnly && item.disabled) continue;
+
+      // Search
+      if (needle.length > 0) {
+        const roomId = item.roomId.toLowerCase();
+        const title = typeof item.title === 'string' ? item.title.toLowerCase() : '';
+        if (roomId.indexOf(needle) < 0 && title.indexOf(needle) < 0) continue;
+      }
+
+      roomsList.push({
+        roomId: item.roomId,
+        title: typeof item.title === 'string' ? item.title : '',
+        ownerId: item.ownerId,
+        ownerNickname: null,
+        chapter: typeof item.chapter === 'number' ? item.chapter : 1,
+        users: roomUsers.get(item.roomId)?.size ?? 0,
+        maxUsers: typeof item.maxUsers === 'number' ? item.maxUsers : 0,
+        disabled: Boolean(item.disabled),
+        readOnly: Boolean(item.readOnly),
+        hasPassword: typeof item.password === 'string' && item.password.length > 0,
+        isOwner: item.ownerId === userId,
+        isModerator: false,
+        lastMessage: null,
+      });
+    }
+
+    // The last message date and the owner nickname are resolved only for the
+    // rooms that are actually returned.
+    const history = db.getTable('history');
+    const users = db.getTable('users');
+    const roomModerators = db.getTable('roomModerators');
+    for (const room of roomsList) {
+      const last = await history.search({
+        q: { group: 'AND', conditions: [{ column: 'roomId', value: room.roomId }] },
+        order: 'date DESC',
+        limit: 1,
+      });
+      const lastItem = Array.isArray(last) ? last[0] : last?.items?.[0];
+      if (typeof lastItem?.date === 'number') room.lastMessage = lastItem.date;
+
+      const owner = await users.get(room.ownerId);
+      if (owner && typeof owner.nickname === 'string') room.ownerNickname = owner.nickname;
+
+      room.isModerator = await roomModerators.has(room.roomId, userId);
+    }
+
+    // Newest activity first, empty rooms at the end.
+    roomsList.sort((a, b) => (b.lastMessage ?? 0) - (a.lastMessage ?? 0));
+
+    // Pagination is applied after the filter, so the client always gets a full
+    // page of visible rooms.
+    const totalPages = Math.max(1, Math.ceil(roomsList.length / perPage));
+    const start = (page - 1) * perPage;
+
+    fn({
+      success: true,
+      rooms: roomsList.slice(start, start + perPage),
+      page,
+      totalPages,
+    });
+  });
+
+  /**
+   * Lists the users currently connected to the server.
+   *
+   * Only the server staff can see the full list.
+   */
+  socket.on('list-users', async (data, fn) => {
+    if (noDataInfo(data, fn)) return;
+    const { search } = data;
+
+    // Validate values
+    if (typeof search !== 'string' && search !== null) return sendIncompleteDataInfo(fn);
+
+    // Get user
+    const userId = userSession.getUserId(socket);
+    if (!userId) return accountNotDetected(fn);
+    if (userLoadIsRateLimited(socket, fn)) return;
+
+    // Only the server staff can list the online users.
+    const moderators = db.getTable('moderators');
+    const isStaff = userId === getIniConfig('OWNER_ID') || (await moderators.has(userId));
+    if (!isStaff) return ownerOnly(fn, 2);
+
+    const users = db.getTable('users');
+    const query = typeof search === 'string' ? search.trim().toLowerCase() : '';
+    const list = [];
+
+    for (const [onlineId, onlineSocket] of userSockets) {
+      if (query.length > 0 && onlineId.toLowerCase().indexOf(query) < 0) continue;
+      const user = await users.get(onlineId);
+      list.push({
+        userId: onlineId,
+        nickname: typeof user?.nickname === 'string' ? user.nickname : null,
+        rooms: Array.isArray(onlineSocket?.data?.rooms) ? [...onlineSocket.data.rooms] : [],
+      });
+    }
+
+    list.sort((a, b) => a.userId.localeCompare(b.userId));
+    fn({ success: true, users: list });
+  });
+
   socket.on('join', async (data, fn) => {
     if (noDataInfo(data, fn)) return;
     const { roomId, password } = data;
@@ -70,7 +235,13 @@ export default function roomManager(socket, emitTo, socketTo, socketEmit) {
     }
     room.maxUsers = room.maxUsers || getIniConfig('MAX_USERS_PER_ROOM');
 
-    if (userId !== getIniConfig('OWNER_ID') && room.ownerId !== userId && !isMod) {
+    // The owner, the server staff and the room moderators can always enter.
+    const roomModeratorsTable = db.getTable('roomModerators');
+    const isRoomModerator = await roomModeratorsTable.has(roomId, userId);
+    const canBypassPassword =
+      userId === getIniConfig('OWNER_ID') || room.ownerId === userId || isMod || isRoomModerator;
+
+    if (!canBypassPassword) {
       // Check if the room has a password and validate it
       if (room.password && room.password !== getHashString(password))
         return fn({ error: true, msg: 'Incorrect room password.', code: 2 });
@@ -126,6 +297,11 @@ export default function roomManager(socket, emitTo, socketTo, socketEmit) {
       permissions: await listRoomPermissions(roomId),
       data: room ?? {},
     });
+
+    // Remember the room, so it shows up in the "visited" list later.
+    const roomMembers = db.getTable('roomMembers');
+    if (!(await roomMembers.has(roomId, userId)))
+      await roomMembers.set(roomId, { userId, date: Date.now() });
 
     // Complete
     await joinRoom(socket, emitTo, roomId, fn);

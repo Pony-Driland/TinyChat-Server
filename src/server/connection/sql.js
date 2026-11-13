@@ -91,6 +91,16 @@ export const startDatabase = async (appStorage) => {
       ['FOREIGN KEY (roomId) REFERENCES rooms(roomId) ON DELETE CASCADE'],
     ]);
 
+    // Stores the rooms an user joined at least once.
+    console.log(`[APP] [${config.database.type}] [table] Loading room members...`);
+    await db.initTable({ name: 'roomMembers', id: 'roomId', subId: 'userId' }, [
+      ['roomId', 'TEXT'],
+      ['userId', 'TEXT'],
+      ['date', 'INTEGER'],
+      ['PRIMARY KEY (roomId, userId)'],
+      ['FOREIGN KEY (roomId) REFERENCES rooms(roomId) ON DELETE CASCADE'],
+    ]);
+
     // Stores users banned from room
     console.log(`[APP] [${config.database.type}] [table] Loading room banned users...`);
     await db.initTable({ name: 'roomBannedUsers', id: 'roomId', subId: 'userId' }, [
