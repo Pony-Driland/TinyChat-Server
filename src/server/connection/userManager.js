@@ -406,6 +406,23 @@ export default function userManager(socket, emitTo) {
       return fn({ error: true, msg: 'Invalid user credentials.', code: 1 });
     }
 
+    // The server owner and the staff can always log in, even when the server
+    // reached the online account limit.
+    const moderators = db.getTable('moderators');
+    const isStaff =
+      storedId === getIniConfig('OWNER_ID') || (await moderators.has(storedId));
+
+    if (!isStaff) {
+      const maxOnline = getIniConfig('MAX_ONLINE_ACCOUNTS');
+      if (typeof maxOnline === 'number' && userSockets.size >= maxOnline) {
+        return fn({
+          error: true,
+          msg: 'The server reached the maximum number of online accounts. Try again later.',
+          code: 6,
+        });
+      }
+    }
+
     // Get the user's nickname from the users map
     const nickname = user.nickname;
 
@@ -423,7 +440,6 @@ export default function userManager(socket, emitTo) {
     );
 
     // Complete
-    const moderators = db.getTable('moderators');
     const usersDice = db.getTable('usersDice');
     fn({
       userId: storedId,
