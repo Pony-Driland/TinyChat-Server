@@ -147,6 +147,11 @@ export default function userManager(socket, emitTo) {
       return fn({ error: true, msg: 'You are not allowed to do this.', code: 1 });
     }
 
+    // The server owner can never be banned.
+    if (userId === getIniConfig('OWNER_ID')) {
+      return fn({ error: true, msg: 'The server owner cannot be banned.', code: 3 });
+    }
+
     // Check if user exists
     const users = db.getTable('users');
     if (!(await users.has(userId))) {
