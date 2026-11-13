@@ -364,8 +364,20 @@ export default function messageManager(socket, socketTo) {
     if (!rUsers || !rUsers.get(yourId))
       return fn({ error: true, code: 2, msg: 'You are not in this room.' });
 
-    // Read-only guests are not allowed to read the room history.
-    if (!(await canSpeakInRoom(roomId, yourId, room)))
+    // Read-only guests may only load the very last page of the room, so they
+    // never enter an empty looking room. Everything else (filters, older pages
+    // and the full history) stays restricted to the allowed users.
+    const isGuest = !(await canSpeakInRoom(roomId, yourId, room));
+    if (
+      isGuest &&
+      (page !== 1 ||
+        perPage === null ||
+        text !== null ||
+        chapter !== null ||
+        start !== null ||
+        end !== null ||
+        userId !== null)
+    )
       return fn({
         error: true,
         msg: 'You are in read-only mode. Wait for the room owner to allow you to read the history.',
