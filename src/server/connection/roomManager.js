@@ -95,12 +95,46 @@ export default function roomManager(socket, emitTo, socketTo, socketEmit) {
       memberList.map((item) => item.roomId).filter((item) => typeof item === 'string'),
     );
 
-    // The room list is small enough to be filtered in memory, and doing it here
-    // keeps the nested OR/AND conditions out of the query builder.
-    const rooms = db.getTable('rooms');
-    const allRooms = await rooms.getAll();
     const needle = typeof search === 'string' ? search.trim().toLowerCase() : '';
     const canSeeAll = scope === 'all';
+
+    // The visibility and the search are pushed down to the database, so only the
+    // rooms the account can actually see leave the database. The filters are
+    // repeated below because `LIKE` treats `%` and `_` as wildcards.
+    const conditions = [];
+    if (!canSeeAll) {
+      conditions.push({
+        group: 'OR',
+        conditions: [
+          { column: 'ownerId', value: userId },
+          ...[...visitedIds].map((roomId) => ({ column: 'roomId', value: roomId })),
+        ],
+      });
+    }
+    if (needle.length > 0) {
+      conditions.push({
+        group: 'OR',
+        conditions: [
+          { column: 'roomId', operator: 'LOWER', newOp: 'LIKE', value: `%${needle}%` },
+          { column: 'title', operator: 'LOWER', newOp: 'LIKE', value: `%${needle}%` },
+        ],
+      });
+    }
+
+    const rooms = db.getTable('rooms');
+    const allRooms = await rooms.search({
+      q: conditions.length > 0 ? { group: 'AND', conditions } : {},
+      select: [
+        'roomId',
+        'title',
+        'ownerId',
+        'chapter',
+        'maxUsers',
+        'disabled',
+        'readOnly',
+        'password',
+      ],
+    });
 
     const roomsList = [];
     for (const item of allRooms) {
@@ -211,7 +245,15 @@ export default function roomManager(socket, emitTo, socketTo, socketEmit) {
     // Source of the account list: every account or only the online ones.
     let accounts;
     if (all) {
-      const rows = await users.getAll();
+      // The search runs inside the database, so only the matching accounts are
+      // transferred instead of the whole users table.
+      const rows = await users.search({
+        q:
+          query.length > 0
+            ? { column: 'userId', operator: 'LOWER', newOp: 'LIKE', value: `%${query}%` }
+            : {},
+        select: ['userId', 'nickname'],
+      });
       accounts = (Array.isArray(rows) ? rows : []).map((row) => ({
         userId: row.userId,
         nickname: typeof row.nickname === 'string' ? row.nickname : null,
@@ -381,10 +423,15 @@ export default function roomManager(socket, emitTo, socketTo, socketEmit) {
     const roomData = db.getTable('roomData');
     const rpgSchema = db.getTable('rpgSchema');
 
+    // Only the moderators of this room are relevant to the client.
+    const modRows = await roomModerators.search({
+      q: { group: 'AND', conditions: [{ column: 'roomId', value: roomId }] },
+    });
+
     socketEmit('room-entered', {
       roomId,
       users,
-      mods: (await roomModerators.getAll()) ?? [],
+      mods: Array.isArray(modRows) ? modRows : (modRows?.items ?? []),
       rpgSchema: (await rpgSchema.get(roomId))?.data ?? {},
       roomData: (await roomData.get(roomId))?.data ?? {},
       roomPrivateData:
