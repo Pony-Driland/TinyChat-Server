@@ -364,6 +364,14 @@ export default function messageManager(socket, socketTo) {
     if (!rUsers || !rUsers.get(yourId))
       return fn({ error: true, code: 2, msg: 'You are not in this room.' });
 
+    // Read-only guests are not allowed to read the room history.
+    if (!(await canSpeakInRoom(roomId, yourId, room)))
+      return fn({
+        error: true,
+        msg: 'You are in read-only mode. Wait for the room owner to allow you to read the history.',
+        code: 7,
+      });
+
     let allMessages = [];
     const history = db.getTable('history');
     const order = 'date DESC';
