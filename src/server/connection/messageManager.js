@@ -735,10 +735,11 @@ export default function messageManager(socket, socketTo, emitTo) {
         code: 3,
       });
 
+    // A dice roll is proof of what was rolled, so the author can never delete
+    // it. Only the room staff can, which keeps the history trustworthy.
     const moderators = db.getTable('moderators');
     const roomModerators = db.getTable('roomModerators');
     if (
-      roll.userId !== userId &&
       userId !== getIniConfig('OWNER_ID') &&
       !(await moderators.has(userId)) &&
       room.ownerId !== userId &&
@@ -748,14 +749,6 @@ export default function messageManager(socket, socketTo, emitTo) {
         error: true,
         msg: `You don't have enough permissions.`,
         code: 4,
-      });
-
-    // A read-only guest cannot delete rolls, not even their own.
-    if (roll.userId === userId && !(await canSpeakInRoom(roomId, userId, room)))
-      return fn({
-        error: true,
-        msg: 'You are in read-only mode. Wait for the room owner to allow you to send messages.',
-        code: 5,
       });
 
     // Delete the roll
