@@ -739,17 +739,21 @@ export default function messageManager(socket, socketTo) {
     if (targets.length < 1) return fn({ success: true, deleted: 0 });
 
     // Delete the rolls.
-    let deleted = 0;
+    const deletedIds = [];
     for (const roll of targets) {
       if (typeof roll.id !== 'string') continue;
       await diceHistory.advancedDelete({
         id: { value: roll.id },
         roomId: { value: roomId },
       });
-      deleted++;
+      deletedIds.push(roll.id);
     }
 
-    fn({ success: true, deleted });
+    // Emit the event only to logged-in users in the room
+    if (deletedIds.length > 0)
+      socketTo(roomId, 'dice-rolls-purged', { roomId, userId, ids: deletedIds });
+
+    fn({ success: true, deleted: deletedIds.length, ids: deletedIds });
   });
 
   socket.on('set-dice', async (data, fn) => {
