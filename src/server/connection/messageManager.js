@@ -55,7 +55,15 @@ const parsePurgeWindow = (mode, amount) => {
  */
 const pickPurgeTargets = (rows, window) => {
   if (window.mode === 'all') return rows;
-  if (window.mode === 'count') return rows.slice(Math.max(window.keep ?? 0, 0));
+
+  // `count` deletes the N most recent rows. A missing or invalid amount is a
+  // no-op, never "delete everything".
+  if (window.mode === 'count') {
+    const amount = window.keep ?? 0;
+    if (!Number.isFinite(amount) || amount < 1) return [];
+    return rows.slice(0, amount);
+  }
+
   if (window.cutoff === null) return [];
   return rows.filter((row) => typeof row.date === 'number' && row.date < window.cutoff);
 };
@@ -63,8 +71,9 @@ const pickPurgeTargets = (rows, window) => {
 /**
  * @param {import('socket.io-client').Socket} socket
  * @param {import('../proxyOnConnection.mjs').EmitTo} socketTo
+ * @param {import('../proxyOnConnection.mjs').EmitTo} emitTo
  */
-export default function messageManager(socket, socketTo) {
+export default function messageManager(socket, socketTo, emitTo) {
   socket.on('send-message', async (data, fn) => {
     if (noDataInfo(data, fn)) return;
     const { message, roomId, tokens, model, hash, isModel, errorCode } = data;
@@ -689,7 +698,7 @@ export default function messageManager(socket, socketTo) {
 
     // Emit the event only to logged-in users in the room
     if (deletedIds.length > 0)
-      socketTo(roomId, 'messages-purged', { roomId, userId, ids: deletedIds });
+      emitTo(roomId, 'messages-purged', { roomId, userId, ids: deletedIds });
 
     fn({ success: true, deleted: deletedIds.length, ids: deletedIds });
   });
@@ -751,7 +760,7 @@ export default function messageManager(socket, socketTo) {
 
     // Emit the event only to logged-in users in the room
     if (deletedIds.length > 0)
-      socketTo(roomId, 'dice-rolls-purged', { roomId, userId, ids: deletedIds });
+      emitTo(roomId, 'dice-rolls-purged', { roomId, userId, ids: deletedIds });
 
     fn({ success: true, deleted: deletedIds.length, ids: deletedIds });
   });

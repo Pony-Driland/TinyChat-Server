@@ -76,7 +76,7 @@ startFiles().then(async (appStorage) => {
     console.log(
       `[APP] [${socket.handshake ? socket.handshake.address : '?.?.?.?'}] User connected: ${socket.id}`,
     );
-    messageManager(socket, socketTo);
+    messageManager(socket, socketTo, emitTo);
     userManager(socket, emitTo);
     roomManager(socket, emitTo, socketTo, socketEmit);
   });
