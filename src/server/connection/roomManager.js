@@ -112,6 +112,17 @@ export default function roomManager(socket, emitTo, socketTo, socketEmit) {
           ...[...visitedIds].map((roomId) => ({ column: 'roomId', value: roomId })),
         ],
       });
+    } else if (!isStaff) {
+      // A public list only exposes the rooms that opted in. The staff always
+      // sees every room, including the private ones.
+      conditions.push({
+        group: 'OR',
+        conditions: [
+          { column: 'public', value: true },
+          { column: 'ownerId', value: userId },
+          ...[...visitedIds].map((roomId) => ({ column: 'roomId', value: roomId })),
+        ],
+      });
     }
     if (needle.length > 0) {
       conditions.push({
@@ -1314,6 +1325,10 @@ export default function roomManager(socket, emitTo, socketTo, socketEmit) {
       ) {
         allowedUpdates.chapter = newSettings.chapter;
       }
+    }
+
+    if ('public' in newSettings) {
+      if (typeof newSettings.public === 'boolean') allowedUpdates.public = newSettings.public;
     }
 
     // Apply updates if there are valid changes

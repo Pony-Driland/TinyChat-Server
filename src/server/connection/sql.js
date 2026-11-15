@@ -54,6 +54,7 @@ export const startDatabase = async (appStorage) => {
       ['disabled', 'BOOLEAN', 'DEFAULT 0'],
       ['readOnly', 'BOOLEAN', 'DEFAULT 0'],
       ['chapter', 'INTEGER', 'NOT NULL DEFAULT 1'],
+      ['public', 'BOOLEAN', 'DEFAULT 0'],
     ]);
 
     // Stores room tokens data
@@ -254,6 +255,19 @@ export const startDatabase = async (appStorage) => {
 
     // Debug mode
     db.setIsDebug(isDebug());
+
+    // Schema migrations. Every entry upgrades the database by one version, so
+    // servers created before the feature was added are patched on boot.
+    db.migrator.addMigration(1, async (database) => {
+      // `public` lets the room show up on the public room list.
+      await database.run(
+        'ALTER TABLE rooms ADD COLUMN public BOOLEAN DEFAULT 0',
+        undefined,
+        'migration.rooms.public',
+      );
+    });
+
+    await db.startMigration(1);
 
     // Complete
     console.log(`[APP] [${config.database.type}] Database connection opened.`);
