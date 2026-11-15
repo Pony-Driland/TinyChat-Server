@@ -61,13 +61,14 @@ export default function roomManager(socket, emitTo, socketTo, socketEmit) {
    */
   socket.on('list-rooms', async (data, fn) => {
     if (noDataInfo(data, fn)) return;
-    const { search, scope, openOnly, page, perPage } = data;
+    const { search, scope, openOnly, ownedOnly, page, perPage } = data;
 
     // Validate values
     if (
       (typeof search !== 'string' && search !== null) ||
       (typeof scope !== 'string' && scope !== null) ||
       typeof openOnly !== 'boolean' ||
+      typeof ownedOnly !== 'boolean' ||
       typeof page !== 'number' ||
       page < 1 ||
       typeof perPage !== 'number' ||
@@ -103,10 +104,12 @@ export default function roomManager(socket, emitTo, socketTo, socketEmit) {
     const needle = typeof search === 'string' ? search.trim().toLowerCase() : '';
     const canSeeAll = scope === 'all';
 
-    // The visibility and the search are pushed down to the database, so only the
-    // rooms the account can actually see leave the database. The filters are
-    // repeated below because `LIKE` treats `%` and `_` as wildcards.
+    // Every filter is pushed down to the database, so the pagination is done by
+    // SQL and the page always contains `perPage` rooms.
     const conditions = [];
+
+    // Visibility. A regular account only sees the rooms it owns or joined,
+    // while the public list only exposes the rooms that opted in.
     if (!canSeeAll) {
       conditions.push({
         group: 'OR',
@@ -116,8 +119,6 @@ export default function roomManager(socket, emitTo, socketTo, socketEmit) {
         ],
       });
     } else if (!isStaff) {
-      // A public list only exposes the rooms that opted in. The staff always
-      // sees every room, including the private ones.
       conditions.push({
         group: 'OR',
         conditions: [
@@ -127,6 +128,14 @@ export default function roomManager(socket, emitTo, socketTo, socketEmit) {
         ],
       });
     }
+
+    // Only the rooms owned by the account.
+    if (ownedOnly) conditions.push({ column: 'ownerId', value: userId });
+
+    // Only the rooms that are open for access.
+    if (openOnly) conditions.push({ column: 'disabled', value: false });
+
+    // Search
     if (needle.length > 0) {
       conditions.push({
         group: 'OR',
@@ -138,7 +147,7 @@ export default function roomManager(socket, emitTo, socketTo, socketEmit) {
     }
 
     const rooms = db.getTable('rooms');
-    const allRooms = await rooms.search({
+    const result = await rooms.search({
       q: conditions.length > 0 ? { group: 'AND', conditions } : {},
       select: [
         'roomId',
@@ -151,24 +160,13 @@ export default function roomManager(socket, emitTo, socketTo, socketEmit) {
         'password',
         'public',
       ],
+      perPage,
+      page,
     });
 
     const roomsList = [];
-    for (const item of allRooms) {
+    for (const item of result.items) {
       if (typeof item?.roomId !== 'string') continue;
-
-      // A regular account only sees the rooms it owns or already joined.
-      if (!canSeeAll && item.ownerId !== userId && !visitedIds.has(item.roomId)) continue;
-
-      // The open/closed filter is applied here so the pagination stays correct.
-      if (openOnly && item.disabled) continue;
-
-      // Search
-      if (needle.length > 0) {
-        const roomId = item.roomId.toLowerCase();
-        const title = typeof item.title === 'string' ? item.title.toLowerCase() : '';
-        if (roomId.indexOf(needle) < 0 && title.indexOf(needle) < 0) continue;
-      }
 
       roomsList.push({
         roomId: item.roomId,
@@ -212,16 +210,11 @@ export default function roomManager(socket, emitTo, socketTo, socketEmit) {
     // Newest activity first, empty rooms at the end.
     roomsList.sort((a, b) => (b.lastMessage ?? 0) - (a.lastMessage ?? 0));
 
-    // Pagination is applied after the filter, so the client always gets a full
-    // page of visible rooms.
-    const totalPages = Math.max(1, Math.ceil(roomsList.length / perPage));
-    const start = (page - 1) * perPage;
-
     fn({
       success: true,
-      rooms: roomsList.slice(start, start + perPage),
-      page,
-      totalPages,
+      rooms: roomsList,
+      page: result.page,
+      totalPages: result.totalPages,
     });
   });
 
