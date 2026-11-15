@@ -707,8 +707,7 @@ export default function messageManager(socket, socketTo, emitTo) {
     if (noDataInfo(data, fn)) return;
     const { roomId, rollId } = data;
     // Validate values
-    if (typeof roomId !== 'string' || typeof rollId !== 'string')
-      return sendIncompleteDataInfo(fn);
+    if (typeof roomId !== 'string' || typeof rollId !== 'string') return sendIncompleteDataInfo(fn);
 
     // Get user
     const userId = userSession.getUserId(socket);
