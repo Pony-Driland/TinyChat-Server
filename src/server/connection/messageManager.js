@@ -17,6 +17,50 @@ import {
 } from './values';
 
 /**
+ * Resolves the purge window chosen by the room owner.
+ *
+ * The client always sends a `mode` plus an optional `amount`. Everything is
+ * resolved here so the socket handlers stay small and both the message and
+ * the dice purge share the same rules.
+ *
+ * @param {unknown} mode - One of `none`, `hours`, `days`, `count` or `all`.
+ * @param {unknown} amount - Custom value of the `hours`, `days` and `count` modes.
+ * @returns {{ mode: string, cutoff: number|null, keep: number|null }}
+ */
+const parsePurgeWindow = (mode, amount) => {
+  const now = Date.now();
+  const value =
+    typeof amount === 'number' && Number.isFinite(amount) && amount > 0 ? Math.floor(amount) : 0;
+
+  switch (mode) {
+    case 'all':
+      return { mode, cutoff: null, keep: null };
+    case 'hours':
+      return { mode, cutoff: value > 0 ? now - value * 60 * 60 * 1000 : null, keep: null };
+    case 'days':
+      return { mode, cutoff: value > 0 ? now - value * 24 * 60 * 60 * 1000 : null, keep: null };
+    case 'count':
+      return { mode, cutoff: null, keep: value };
+    default:
+      return { mode: 'none', cutoff: null, keep: null };
+  }
+};
+
+/**
+ * Picks the rows that must be deleted.
+ *
+ * @param {Array<{ date?: number }>} rows - Rows ordered from newest to oldest.
+ * @param {{ mode: string, cutoff: number|null, keep: number|null }} window - Resolved window.
+ * @returns {Array<{ date?: number }>}
+ */
+const pickPurgeTargets = (rows, window) => {
+  if (window.mode === 'all') return rows;
+  if (window.mode === 'count') return rows.slice(Math.max(window.keep ?? 0, 0));
+  if (window.cutoff === null) return [];
+  return rows.filter((row) => typeof row.date === 'number' && row.date < window.cutoff);
+};
+
+/**
  * @param {import('socket.io-client').Socket} socket
  * @param {import('../proxyOnConnection.mjs').EmitTo} socketTo
  */
@@ -579,6 +623,133 @@ export default function messageManager(socket, socketTo) {
         history: allData.items.reverse(),
       });
     } else return fn({ error: true, code: 6, msg: `You can\'t load all history!` });
+  });
+
+  /**
+   * Deletes every message of an user, following the window picked by the owner.
+   *
+   * Only the room owner and the server owner may call it. The deleted rows are
+   * copied to `historyDeleted` first, exactly like `delete-message` does, so a
+   * wrong purge can still be recovered from the database.
+   */
+  socket.on('purge-user-messages', async (data, fn) => {
+    if (noDataInfo(data, fn)) return;
+    const { roomId, userId, mode, amount } = data;
+    // Validate values
+    if (typeof roomId !== 'string' || typeof userId !== 'string' || userId.length < 1)
+      return sendIncompleteDataInfo(fn);
+
+    // Get user
+    const yourId = userSession.getUserId(socket);
+    if (!yourId) return accountNotDetected(fn);
+    if (userMsgDeleteIsRateLimited(socket, fn)) return;
+
+    // Get room
+    const rooms = db.getTable('rooms');
+    const room = await rooms.get(roomId);
+    if (!room) return fn({ error: true, msg: 'Room not found.', code: 1 });
+
+    // Only the room owner or the server owner can purge messages.
+    if (yourId !== room.ownerId && yourId !== getIniConfig('OWNER_ID'))
+      return fn({ error: true, msg: 'You are not allowed to do this.', code: 2 });
+
+    const window = parsePurgeWindow(mode, amount);
+    if (window.mode === 'none') return fn({ success: true, deleted: 0 });
+
+    // Load every message of the user, newest first.
+    const roomHistories = db.getTable('history');
+    const rows = await roomHistories.search({
+      order: 'date DESC',
+      q: {
+        group: 'AND',
+        conditions: [
+          { column: 'roomId', value: roomId },
+          { column: 'userId', value: userId },
+        ],
+      },
+    });
+
+    const messages = Array.isArray(rows) ? rows : (rows?.items ?? []);
+    const targets = pickPurgeTargets(messages, window);
+    if (targets.length < 1) return fn({ success: true, deleted: 0 });
+
+    // Move the messages to the trash before deleting them.
+    const roomHistoriesDeleted = db.getTable('historyDeleted');
+    const deletedIds = [];
+
+    for (const msg of targets) {
+      if (typeof msg.historyId !== 'string') continue;
+      await roomHistoriesDeleted.set(roomId, msg);
+      await roomHistories.advancedDelete({
+        historyId: { value: msg.historyId },
+        roomId: { value: roomId },
+      });
+      deletedIds.push(msg.historyId);
+    }
+
+    // Emit the event only to logged-in users in the room
+    if (deletedIds.length > 0)
+      socketTo(roomId, 'messages-purged', { roomId, userId, ids: deletedIds });
+
+    fn({ success: true, deleted: deletedIds.length, ids: deletedIds });
+  });
+
+  /**
+   * Deletes every dice roll of an user, following the window picked by the owner.
+   */
+  socket.on('purge-user-dice', async (data, fn) => {
+    if (noDataInfo(data, fn)) return;
+    const { roomId, userId, mode, amount } = data;
+    // Validate values
+    if (typeof roomId !== 'string' || typeof userId !== 'string' || userId.length < 1)
+      return sendIncompleteDataInfo(fn);
+
+    // Get user
+    const yourId = userSession.getUserId(socket);
+    if (!yourId) return accountNotDetected(fn);
+    if (userMsgDeleteIsRateLimited(socket, fn)) return;
+
+    // Get room
+    const rooms = db.getTable('rooms');
+    const room = await rooms.get(roomId);
+    if (!room) return fn({ error: true, msg: 'Room not found.', code: 1 });
+
+    // Only the room owner or the server owner can purge the dice history.
+    if (yourId !== room.ownerId && yourId !== getIniConfig('OWNER_ID'))
+      return fn({ error: true, msg: 'You are not allowed to do this.', code: 2 });
+
+    const window = parsePurgeWindow(mode, amount);
+    if (window.mode === 'none') return fn({ success: true, deleted: 0 });
+
+    // Load every dice roll of the user, newest first.
+    const diceHistory = db.getTable('diceHistory');
+    const rows = await diceHistory.search({
+      order: 'date DESC',
+      q: {
+        group: 'AND',
+        conditions: [
+          { column: 'roomId', value: roomId },
+          { column: 'userId', value: userId },
+        ],
+      },
+    });
+
+    const rolls = Array.isArray(rows) ? rows : (rows?.items ?? []);
+    const targets = pickPurgeTargets(rolls, window);
+    if (targets.length < 1) return fn({ success: true, deleted: 0 });
+
+    // Delete the rolls.
+    let deleted = 0;
+    for (const roll of targets) {
+      if (typeof roll.id !== 'string') continue;
+      await diceHistory.advancedDelete({
+        id: { value: roll.id },
+        roomId: { value: roomId },
+      });
+      deleted++;
+    }
+
+    fn({ success: true, deleted });
   });
 
   socket.on('set-dice', async (data, fn) => {
