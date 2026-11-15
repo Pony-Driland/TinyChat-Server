@@ -69,6 +69,87 @@ const pickPurgeTargets = (rows, window) => {
 };
 
 /**
+ * Maximum amount of ids sent in a single `advancedDelete` call.
+ *
+ * The purge used to delete one row per query, which is really slow on big
+ * histories. Grouping the ids in buckets keeps the query count low while
+ * staying well below the SQLite/PostgreSQL parameter limit.
+ */
+const PURGE_BUCKET_SIZE = 100;
+
+/**
+ * Splits a list into fixed size buckets.
+ *
+ * @template T
+ * @param {T[]} items - Items to split.
+ * @param {number} size - Maximum amount of items per bucket.
+ * @returns {T[][]}
+ */
+const chunk = (items, size) => {
+  const buckets = [];
+  for (let i = 0; i < items.length; i += size) buckets.push(items.slice(i, i + size));
+  return buckets;
+};
+
+/**
+ * Builds a `roomId = ? AND (column = ? OR column = ? ...)` filter.
+ *
+ * The `IN` operator is not registered by the query builder, so the id list is
+ * expanded into an `OR` group instead.
+ *
+ * @param {string} roomId - Room that owns the rows.
+ * @param {string} column - Column holding the row id.
+ * @param {Array<string|number>} ids - Ids to match.
+ * @returns {{ group: string, conditions: Array<unknown> }}
+ */
+const buildIdFilter = (roomId, column, ids) => ({
+  group: 'AND',
+  conditions: [
+    { column: 'roomId', value: roomId },
+    { group: 'OR', conditions: ids.map((id) => ({ column, value: id })) },
+  ],
+});
+
+/**
+ * Moves the given rows to the trash table (when any) and deletes them in bulk.
+ *
+ * Instead of one `advancedDelete` per row, the rows are grouped in buckets and
+ * every bucket is removed with a single query.
+ *
+ * @param {object} options - Purge options.
+ * @param {string} options.table - Table that owns the rows.
+ * @param {string|null} options.trashTable - Table that receives a copy of the rows.
+ * @param {string} options.column - Column holding the row id.
+ * @param {string} options.roomId - Room that owns the rows.
+ * @param {Array<Record<string, unknown>>} options.rows - Rows to delete.
+ * @returns {Promise<Array<string|number>>} The deleted ids.
+ */
+const purgeRows = async ({ table, trashTable, column, roomId, rows }) => {
+  const source = db.getTable(table);
+  const trash = trashTable ? db.getTable(trashTable) : null;
+  const deletedIds = [];
+
+  for (const bucket of chunk(rows, PURGE_BUCKET_SIZE)) {
+    const items = bucket.filter((row) => typeof row[column] === 'string');
+    if (items.length < 1) continue;
+
+    const ids = items.map((row) => row[column]);
+
+    // Copy the rows to the trash before removing them.
+    if (trash)
+      await trash.set(
+        ids.map(() => roomId),
+        items,
+      );
+
+    await source.advancedDelete(buildIdFilter(roomId, column, ids));
+    deletedIds.push(...ids);
+  }
+
+  return deletedIds;
+};
+
+/**
  * @param {import('socket.io-client').Socket} socket
  * @param {import('../proxyOnConnection.mjs').EmitTo} socketTo
  * @param {import('../proxyOnConnection.mjs').EmitTo} emitTo
@@ -682,19 +763,14 @@ export default function messageManager(socket, socketTo, emitTo) {
     const targets = pickPurgeTargets(messages, window);
     if (targets.length < 1) return fn({ success: true, deleted: 0 });
 
-    // Move the messages to the trash before deleting them.
-    const roomHistoriesDeleted = db.getTable('historyDeleted');
-    const deletedIds = [];
-
-    for (const msg of targets) {
-      if (typeof msg.historyId !== 'string') continue;
-      await roomHistoriesDeleted.set(roomId, msg);
-      await roomHistories.advancedDelete({
-        historyId: { value: msg.historyId },
-        roomId: { value: roomId },
-      });
-      deletedIds.push(msg.historyId);
-    }
+    // Move the messages to the trash and delete them in bulk.
+    const deletedIds = await purgeRows({
+      table: 'history',
+      trashTable: 'historyDeleted',
+      column: 'historyId',
+      roomId,
+      rows: targets,
+    });
 
     // Emit the event only to logged-in users in the room
     if (deletedIds.length > 0)
@@ -805,16 +881,14 @@ export default function messageManager(socket, socketTo, emitTo) {
     const targets = pickPurgeTargets(rolls, window);
     if (targets.length < 1) return fn({ success: true, deleted: 0 });
 
-    // Delete the rolls.
-    const deletedIds = [];
-    for (const roll of targets) {
-      if (typeof roll.id !== 'string') continue;
-      await diceHistory.advancedDelete({
-        id: { value: roll.id },
-        roomId: { value: roomId },
-      });
-      deletedIds.push(roll.id);
-    }
+    // Delete the rolls in bulk.
+    const deletedIds = await purgeRows({
+      table: 'diceHistory',
+      trashTable: null,
+      column: 'id',
+      roomId,
+      rows: targets,
+    });
 
     // Emit the event only to logged-in users in the room
     if (deletedIds.length > 0)
