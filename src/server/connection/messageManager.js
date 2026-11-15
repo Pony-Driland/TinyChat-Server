@@ -703,6 +703,72 @@ export default function messageManager(socket, socketTo, emitTo) {
     fn({ success: true, deleted: deletedIds.length, ids: deletedIds });
   });
 
+  socket.on('delete-dice-roll', async (data, fn) => {
+    if (noDataInfo(data, fn)) return;
+    const { roomId, rollId } = data;
+    // Validate values
+    if (typeof roomId !== 'string' || typeof rollId !== 'string')
+      return sendIncompleteDataInfo(fn);
+
+    // Get user
+    const userId = userSession.getUserId(socket);
+    if (!userId) return accountNotDetected(fn); // Only logged-in users can delete
+    if (userMsgDeleteIsRateLimited(socket, fn)) return;
+
+    // Get room
+    const rooms = db.getTable('rooms');
+    const room = await rooms.get(roomId);
+    if (!room) return fn({ error: true, msg: 'Room not found.', code: 1 });
+
+    // Check if the user is in the room
+    const rUsers = roomUsers.get(roomId);
+    if (!rUsers || !rUsers.get(userId))
+      return fn({ error: true, code: 2, msg: 'You are not in this room.' });
+
+    // Get the roll
+    const diceHistory = db.getTable('diceHistory');
+    const roll = await diceHistory.get(roomId, rollId);
+    if (!roll)
+      return fn({
+        error: true,
+        msg: `The original dice roll was not found.`,
+        code: 3,
+      });
+
+    const moderators = db.getTable('moderators');
+    const roomModerators = db.getTable('roomModerators');
+    if (
+      roll.userId !== userId &&
+      userId !== getIniConfig('OWNER_ID') &&
+      !(await moderators.has(userId)) &&
+      room.ownerId !== userId &&
+      !(await roomModerators.has(roomId, userId))
+    )
+      return fn({
+        error: true,
+        msg: `You don't have enough permissions.`,
+        code: 4,
+      });
+
+    // A read-only guest cannot delete rolls, not even their own.
+    if (roll.userId === userId && !(await canSpeakInRoom(roomId, userId, room)))
+      return fn({
+        error: true,
+        msg: 'You are in read-only mode. Wait for the room owner to allow you to send messages.',
+        code: 5,
+      });
+
+    // Delete the roll
+    await diceHistory.advancedDelete({
+      id: { value: rollId },
+      roomId: { value: roomId },
+    });
+
+    // Emit the event only to logged-in users in the room
+    emitTo(roomId, 'dice-roll-deleted', { roomId, id: rollId });
+    fn({ success: true, roomId, id: rollId });
+  });
+
   /**
    * Deletes every dice roll of an user, following the window picked by the owner.
    */
