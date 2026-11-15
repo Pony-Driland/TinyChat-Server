@@ -368,6 +368,40 @@ export default function roomManager(socket, emitTo, socketTo, socketEmit) {
     });
   });
 
+  /**
+   * Forgets that the signed-in account visited a room.
+   *
+   * Only the `roomMembers` row is removed, so the room disappears from the
+   * "visited" list of the account.
+   */
+  socket.on('forget-room', async (data, fn) => {
+    if (noDataInfo(data, fn)) return;
+    const { roomId } = data;
+    // Validate values
+    if (typeof roomId !== 'string') return sendIncompleteDataInfo(fn);
+
+    // Get user
+    const userId = userSession.getUserId(socket);
+    if (!userId) return accountNotDetected(fn);
+    if (userLoadIsRateLimited(socket, fn)) return;
+
+    // The owner always keeps the room on the list.
+    const rooms = db.getTable('rooms');
+    const room = await rooms.get(roomId);
+    if (room && room.ownerId === userId)
+      return fn({
+        error: true,
+        msg: 'You cannot forget a room you own.',
+        code: 2,
+      });
+
+    // Forget the visit
+    const roomMembers = db.getTable('roomMembers');
+    if (await roomMembers.has(roomId, userId)) await roomMembers.delete(roomId, userId);
+
+    fn({ success: true });
+  });
+
   socket.on('join', async (data, fn) => {
     if (noDataInfo(data, fn)) return;
     const { roomId, password } = data;
