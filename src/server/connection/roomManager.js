@@ -93,9 +93,12 @@ export default function roomManager(socket, emitTo, socketTo, socketEmit) {
       q: { group: 'AND', conditions: [{ column: 'userId', value: userId }] },
     });
     const memberList = Array.isArray(memberRows) ? memberRows : (memberRows?.items ?? []);
-    const visitedIds = new Set(
-      memberList.map((item) => item.roomId).filter((item) => typeof item === 'string'),
+    const visitedAt = new Map(
+      memberList
+        .filter((item) => typeof item.roomId === 'string')
+        .map((item) => [item.roomId, typeof item.date === 'number' ? item.date : null]),
     );
+    const visitedIds = new Set(visitedAt.keys());
 
     const needle = typeof search === 'string' ? search.trim().toLowerCase() : '';
     const canSeeAll = scope === 'all';
@@ -179,6 +182,7 @@ export default function roomManager(socket, emitTo, socketTo, socketEmit) {
         readOnly: Boolean(item.readOnly),
         hasPassword: typeof item.password === 'string' && item.password.length > 0,
         public: Boolean(item.public),
+        visitedAt: visitedAt.get(item.roomId) ?? null,
         isOwner: item.ownerId === userId,
         isModerator: false,
         lastMessage: null,
