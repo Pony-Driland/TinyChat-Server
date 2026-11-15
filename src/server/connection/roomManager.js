@@ -146,6 +146,7 @@ export default function roomManager(socket, emitTo, socketTo, socketEmit) {
         'disabled',
         'readOnly',
         'password',
+        'public',
       ],
     });
 
@@ -177,6 +178,7 @@ export default function roomManager(socket, emitTo, socketTo, socketEmit) {
         disabled: Boolean(item.disabled),
         readOnly: Boolean(item.readOnly),
         hasPassword: typeof item.password === 'string' && item.password.length > 0,
+        public: Boolean(item.public),
         isOwner: item.ownerId === userId,
         isModerator: false,
         lastMessage: null,
