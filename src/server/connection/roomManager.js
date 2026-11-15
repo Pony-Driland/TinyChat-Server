@@ -80,10 +80,12 @@ export default function roomManager(socket, emitTo, socketTo, socketEmit) {
     if (!userId) return accountNotDetected(fn);
     if (userLoadIsRateLimited(socket, fn)) return;
 
-    // Only the server staff can list every room of the server.
+    // Only the server staff can list every room of the server, unless the
+    // server owner made the room list public.
     const moderators = db.getTable('moderators');
     const isStaff = userId === getIniConfig('OWNER_ID') || (await moderators.has(userId));
-    if (scope === 'all' && !isStaff) return ownerOnly(fn, 2);
+    const canListAll = isStaff || Boolean(getIniConfig('PUBLIC_ROOMS'));
+    if (scope === 'all' && !canListAll) return ownerOnly(fn, 2);
 
     // Every room the account already joined before.
     const members = db.getTable('roomMembers');

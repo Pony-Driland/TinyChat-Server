@@ -52,6 +52,7 @@ export default async function startFiles() {
 
       _setIniConfig('OPEN_REGISTRATION', getIniBoolean(theCfg.server.registration_open));
       _setIniConfig('LOAD_ALL_HISTORY', getIniBoolean(theCfg.server.load_all_history));
+      _setIniConfig('PUBLIC_ROOMS', getIniBoolean(theCfg.server.public_rooms));
 
       if (typeof theCfg.proxy.address === 'string')
         _setIniConfig('PROXY_ADDRESS', theCfg.proxy.address);

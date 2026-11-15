@@ -277,6 +277,7 @@ export const getRateLimit = () => ({
     selectionText: getIniConfig('DICE_SELECTION_TEXT_STYLE'),
   },
   loadAllHistory: getIniConfig('LOAD_ALL_HISTORY'),
+  publicRooms: Boolean(getIniConfig('PUBLIC_ROOMS')),
   time: getIniConfig('RATE_LIMIT_TIME'),
   openRegistration: getIniConfig('OPEN_REGISTRATION'),
 });
