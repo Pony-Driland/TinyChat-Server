@@ -20,6 +20,22 @@ import {
  * @param {import('../proxyOnConnection.mjs').EmitTo} emitTo
  */
 export default function userManager(socket, emitTo) {
+  /**
+   * Tells every room the account is in that its staff role changed.
+   *
+   * The room list is the only place that knows which rooms the account is
+   * currently in, so the event is emitted per room instead of globally.
+   *
+   * @param {string} userId - Account that changed.
+   * @param {boolean} isStaff - New staff state.
+   * @returns {void}
+   */
+  const broadcastStaff = (userId, isStaff) => {
+    roomUsers.forEach((users, roomId) => {
+      if (users.has(userId)) emitTo(roomId, 'user-staff-updated', { roomId, userId, isStaff });
+    });
+  };
+
   socket.on('user-is-mod', async (data, fn) => {
     if (noDataInfo(data, fn)) return;
     const { userId } = data;
@@ -103,6 +119,9 @@ export default function userManager(socket, emitTo) {
     if (!(await moderators.has(userId)))
       await moderators.set(userId, { date: Date.now() });
 
+    // Every room the account is in has to refresh the badge.
+    broadcastStaff(userId, true);
+
     fn({ success: true });
   });
 
@@ -126,6 +145,9 @@ export default function userManager(socket, emitTo) {
     // Remove from the staff list
     const moderators = db.getTable('moderators');
     if (await moderators.has(userId)) await moderators.delete(userId);
+
+    // Every room the account is in has to refresh the badge.
+    broadcastStaff(userId, false);
 
     fn({ success: true });
   });

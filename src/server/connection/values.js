@@ -393,10 +393,33 @@ export const ownerOnly = (fn, code = 0) => {
 };
 
 // Join Room
-export const getJoinData = (socket) => {
+export const getJoinData = async (socket) => {
   const nickname = userSession.getNickname(socket);
   const pingNow = Date.now();
-  return { nickname, ping: pingNow };
+  const userId = userSession.getUserId(socket);
+
+  // The server staff badge is public inside the room, so every client can
+  // render the icon without an extra request.
+  const isStaff = await isServerStaff(userId);
+
+  return { nickname, ping: pingNow, isStaff };
+};
+
+/**
+ * Tells whether an account belongs to the server staff.
+ *
+ * The server owner always counts as staff. The moderator table is the single
+ * source of truth, so a promotion is reflected on the next join.
+ *
+ * @param {string} userId - Account id.
+ * @returns {Promise<boolean>}
+ */
+export const isServerStaff = async (userId) => {
+  if (typeof userId !== 'string' || userId.length < 1) return false;
+  if (userId === getIniConfig('OWNER_ID')) return true;
+
+  const moderators = db.getTable('moderators');
+  return moderators.has(userId);
 };
 
 export const joinRoom = async (socket, emitTo, roomId, fn) => {
@@ -405,7 +428,7 @@ export const joinRoom = async (socket, emitTo, roomId, fn) => {
     const userId = userSession.getUserId(socket);
     if (userId && roomId) {
       // Add user to the room's user map with their nickname and initial ping value (e.g., 0 for now)
-      const joinData = getJoinData(socket);
+      const joinData = await getJoinData(socket);
       if (!roomUsers.has(roomId)) {
         roomUsers.set(roomId, new Map());
       }
@@ -419,7 +442,13 @@ export const joinRoom = async (socket, emitTo, roomId, fn) => {
       );
 
       userSession.addRoom(socket, roomId);
-      const socketData = { roomId, userId, nickname: joinData.nickname, ping: joinData.ping };
+      const socketData = {
+        roomId,
+        userId,
+        nickname: joinData.nickname,
+        ping: joinData.ping,
+        isStaff: joinData.isStaff,
+      };
       emitTo(roomId, 'user-joined', socketData);
       if (fn) fn(socketData);
       return true;

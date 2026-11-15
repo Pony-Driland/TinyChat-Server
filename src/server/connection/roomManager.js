@@ -483,7 +483,7 @@ export default function roomManager(socket, emitTo, socketTo, socketEmit) {
     if (typeof room.password !== 'undefined') delete room.password;
     const usersList = roomUsers.get(roomId);
     const users = usersList ? Object.fromEntries(usersList) : {};
-    if (!users[userId]) users[userId] = getJoinData(socket);
+    if (!users[userId]) users[userId] = await getJoinData(socket);
 
     const roomModerators = db.getTable('roomModerators');
     const privateRoomData = db.getTable('privateRoomData');
