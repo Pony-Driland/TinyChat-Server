@@ -21,6 +21,8 @@ Use it when you need to:
   - [chapters](#chapters)
   - [export](#export)
   - [import](#import)
+  - [restore](#restore)
+  - [trash](#trash)
 - [Interactive selection](#-interactive-selection)
 - [Import modes](#-import-modes)
 - [Global options](#-global-options)
@@ -237,6 +239,114 @@ The file is **fully validated before** any write. If a single entry is invalid, 
 [fail] [3] has an invalid "user" (non-empty string expected).
 [fail] The file contains invalid entries. Nothing was imported.
 ```
+
+---
+
+### `restore`
+
+Brings messages back from the **`historyDeleted` safety backup** into the `history` table.
+
+Every deletion in TinyChat copies the row to `historyDeleted` first, so this is the command you
+want after an accidental delete, a bad moderation action or a failed purge.
+
+```bash
+tiny-rpg-chat-archive restore [options]
+```
+
+| Option | Description |
+|---|---|
+| `-r, --room <id>` | Room to restore into (asks if omitted) |
+| `-n, --limit <n>` | Restore the **n newest** messages |
+| `--dates <n>` | Restore every message from the **n most recent days** |
+| `--all` | Restore the whole backup of the room |
+| `--overwrite` | Replace rows that already exist in `history` |
+| `--dry-run` | Print the report without writing |
+| `-y, --yes` | Skip the confirmation (for scripts) |
+
+```bash
+# The 25 most recent deleted messages
+ tiny-rpg-chat-archive restore -r lobby --limit 25
+
+# Everything deleted in the last 7 days
+ tiny-rpg-chat-archive restore -r lobby --dates 7
+
+# The whole backup, replacing duplicated ids
+ tiny-rpg-chat-archive restore -r lobby --all --overwrite
+```
+
+Before touching anything the CLI prints a **full report** of the consequences and asks you to type
+`restore`:
+
+```
+───────────────────────────────────────────────────────────────────────────────
+ RESTORE FROM SAFETY BACKUP
+───────────────────────────────────────────────────────────────────────────────
+  Room ................: lobby
+  Messages affected ...: 2 of 6 in the backup
+  Distinct dates ......: 2
+  Date range ..........: 2026-11-15 → 2026-11-16
+  Chapters ...........: 1 (2)
+  Authors ............: 2
+          1x alice
+          1x bob
+  Preview:
+      2026-11-16  alice          deleted message number 0
+      2026-11-15  bob            deleted message number 1
+───────────────────────────────────────────────────────────────────────────────
+  This action will:
+    • Copy 2 message(s) from "historyDeleted" back to "history".
+    • Remove the restored rows from the safety backup.
+    • No id conflicts were found.
+    • This is a write operation on the live database. Back it up first.
+────────────────────────────────────────────────────────────────────────────────
+
+Restore these messages?
+  Type "restore" to continue:
+```
+
+The whole move runs inside a **single transaction**: either every selected message goes back to
+`history` and leaves the backup, or nothing changes at all.
+
+> 💡 Rows whose id already exists in `history` are **skipped** by default. Add `--overwrite` to
+> replace them (useful after a partial import).
+
+---
+
+### `trash`
+
+Manages the `historyDeleted` table itself. Use it to inspect the backup and to keep it from growing
+forever.
+
+```bash
+tiny-rpg-chat-archive trash <list|purge|empty> [options]
+```
+
+| Action | Description |
+|---|---|
+| `list` | Read-only report of what the backup holds (default) |
+| `purge` | **Permanently delete** the selected rows |
+| `empty` | **Permanently delete** every row (of a room, or of every room) |
+
+Selection flags are the same as `restore`: `--limit <n>`, `--dates <n>` and `--all`.
+
+```bash
+# What is in the backup?
+tiny-rpg-chat-archive trash list -r lobby
+
+# Drop everything older than the 30 most recent days
+tiny-rpg-chat-archive trash purge -r lobby --dates 30
+
+# Wipe the backup of a single room
+tiny-rpg-chat-archive trash empty -r lobby
+
+# Wipe the backup of EVERY room
+tiny-rpg-chat-archive trash empty
+```
+
+`purge` asks you to type `delete` and `empty` asks you to type `DELETE EVERYTHING` (or the room id
+when `--room` is used). There is **no undo**: the rows are gone from the database.
+
+---
 
 ---
 

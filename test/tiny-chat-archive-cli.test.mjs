@@ -5,7 +5,16 @@ import { tmpdir } from 'os';
 import { join } from 'path';
 
 import { runCli } from './helpers/cli.mjs';
-import { createFixture, seedMessages, readMessages } from './helpers/database.mjs';
+import {
+  createFixture,
+  seedMessages,
+  readMessages,
+  seedTrash,
+  readTrash,
+  openDatabase,
+  run,
+  close,
+} from './helpers/database.mjs';
 
 /** @type {Awaited<ReturnType<typeof createFixture>>} */
 let fixture;
@@ -81,7 +90,10 @@ describe('interface', () => {
   });
 
   test('the file is executable and has a shebang', () => {
-    const source = readFileSync(new URL('../build/tiny-chat-archive-cli.js', import.meta.url), 'utf-8');
+    const source = readFileSync(
+      new URL('../build/tiny-chat-archive-cli.js', import.meta.url),
+      'utf-8',
+    );
     assert.ok(source.startsWith('#!/usr/bin/env node'));
   });
 });
@@ -178,18 +190,7 @@ describe('export', () => {
 
   test('--minimal drops every optional column', async () => {
     const file = jsonFile('minimal.json');
-    await runCli([
-      'export',
-      '-d',
-      dataDir(),
-      '-r',
-      'lobby',
-      '-c',
-      '1',
-      '-f',
-      file,
-      '--minimal',
-    ]);
+    await runCli(['export', '-d', dataDir(), '-r', 'lobby', '-c', '1', '-f', file, '--minimal']);
 
     const [entry] = readJson(file);
     for (const key of ['model', 'hash', 'edited', 'tokens', 'errorCode', 'isModel'])
@@ -575,6 +576,217 @@ describe('interactive mode', () => {
 
     assert.equal(code, 1);
     assert.match(stderr, /Aborting|No option|No more input/);
+  });
+});
+
+// -----------------------------------------------------------------------------
+// restore (historyDeleted -> history)
+// -----------------------------------------------------------------------------
+
+const DAY = 86400000;
+const NOW = Date.UTC(2026, 0, 10, 12, 0, 0);
+
+/** Creates an isolated room with a seeded safety backup. */
+async function trashFixture(roomId) {
+  const db = openDatabase(fixture.file);
+  try {
+    await run(db, 'INSERT INTO rooms (roomId, title, ownerId) VALUES (?, ?, ?)', [
+      roomId,
+      roomId,
+      'admin',
+    ]);
+  } finally {
+    await close(db);
+  }
+
+  await seedTrash(
+    fixture.file,
+    [0, 1, 2, 3].map((index) => ({
+      roomId,
+      userId: index % 2 === 0 ? 'alice' : 'bob',
+      text: `deleted ${index}`,
+      date: NOW - index * DAY,
+      chapter: 1,
+    })),
+  );
+
+  return roomId;
+}
+
+describe('restore', () => {
+  test('--limit restores the newest messages and clears them from the backup', async () => {
+    const room = await trashFixture('restore-limit');
+
+    const { code } = await runCli(['restore', '-d', dataDir(), '-r', room, '--limit', '2'], {
+      input: 'restore\n',
+    });
+
+    assert.equal(code, 0);
+    const restored = await readMessages(fixture.file, room);
+    assert.deepEqual(
+      restored.map((row) => row.text),
+      ['deleted 1', 'deleted 0'],
+    );
+    assert.equal((await readTrash(fixture.file, room)).length, 2);
+  });
+
+  test('--dates restores every message of the N most recent days', async () => {
+    const room = await trashFixture('restore-dates');
+
+    const { code } = await runCli(['restore', '-d', dataDir(), '-r', room, '--dates', '2'], {
+      input: 'restore\n',
+    });
+
+    assert.equal(code, 0);
+    assert.equal((await readMessages(fixture.file, room)).length, 2);
+    assert.equal((await readTrash(fixture.file, room)).length, 2);
+  });
+
+  test('--all restores the whole backup', async () => {
+    const room = await trashFixture('restore-all');
+
+    await runCli(['restore', '-d', dataDir(), '-r', room, '--all'], { input: 'restore\n' });
+
+    assert.equal((await readMessages(fixture.file, room)).length, 4);
+    assert.equal((await readTrash(fixture.file, room)).length, 0);
+  });
+
+  test('a wrong confirmation word changes nothing', async () => {
+    const room = await trashFixture('restore-cancel');
+
+    const { stdout } = await runCli(['restore', '-d', dataDir(), '-r', room, '--all'], {
+      input: 'yes\n',
+    });
+
+    assert.match(stdout, /cancelled/i);
+    assert.equal((await readMessages(fixture.file, room)).length, 0);
+    assert.equal((await readTrash(fixture.file, room)).length, 4);
+  });
+
+  test('--dry-run writes nothing', async () => {
+    const room = await trashFixture('restore-dry');
+
+    const { stdout } = await runCli(['restore', '-d', dataDir(), '-r', room, '--all', '--dry-run']);
+
+    assert.match(stdout, /dry-run/);
+    assert.equal((await readMessages(fixture.file, room)).length, 0);
+    assert.equal((await readTrash(fixture.file, room)).length, 4);
+  });
+
+  test('requires a scope flag', async () => {
+    const room = await trashFixture('restore-noscope');
+
+    const { code, stderr } = await runCli(['restore', '-d', dataDir(), '-r', room]);
+
+    assert.equal(code, 1);
+    assert.match(stderr, /--limit/);
+  });
+
+  test('rejects two scopes at once', async () => {
+    const room = await trashFixture('restore-both');
+
+    const { code, stderr } = await runCli([
+      'restore',
+      '-d',
+      dataDir(),
+      '-r',
+      room,
+      '--all',
+      '--limit',
+      '1',
+    ]);
+
+    assert.equal(code, 1);
+    assert.match(stderr, /only one/i);
+  });
+
+  test('--older-than only matches messages older than the window', async () => {
+    const room = await trashFixture('restore-older');
+
+    // Every seeded message is in the past, so a 0 day window matches nothing.
+    const { stdout } = await runCli(
+      ['restore', '-d', dataDir(), '-r', room, '--older-than', '0', '--dry-run'],
+      { input: '' },
+    );
+
+    assert.match(stdout, /dry-run/);
+    assert.equal((await readTrash(fixture.file, room)).length, 4);
+  });
+});
+
+// -----------------------------------------------------------------------------
+// trash
+// -----------------------------------------------------------------------------
+
+describe('trash', () => {
+  test('list is read-only', async () => {
+    const room = await trashFixture('trash-list');
+
+    const { code, stdout } = await runCli(['trash', 'list', '-d', dataDir(), '-r', room]);
+
+    assert.equal(code, 0);
+    assert.match(stdout, /SAFETY BACKUP/);
+    assert.equal((await readTrash(fixture.file, room)).length, 4);
+  });
+
+  test('purge --limit deletes only the selection', async () => {
+    const room = await trashFixture('trash-purge');
+
+    const { code } = await runCli(['trash', 'purge', '-d', dataDir(), '-r', room, '--limit', '3'], {
+      input: 'delete\n',
+    });
+
+    assert.equal(code, 0);
+    assert.equal((await readTrash(fixture.file, room)).length, 1);
+  });
+
+  test('purge --dry-run keeps everything', async () => {
+    const room = await trashFixture('trash-dry');
+
+    const { stdout } = await runCli([
+      'trash',
+      'purge',
+      '-d',
+      dataDir(),
+      '-r',
+      room,
+      '--all',
+      '--dry-run',
+    ]);
+
+    assert.match(stdout, /dry-run/);
+    assert.equal((await readTrash(fixture.file, room)).length, 4);
+  });
+
+  test('empty --room wipes a single room', async () => {
+    const room = await trashFixture('trash-empty-room');
+
+    const { code } = await runCli(['trash', 'empty', '-d', dataDir(), '-r', room], {
+      input: `${room}\n`,
+    });
+
+    assert.equal(code, 0);
+    assert.equal((await readTrash(fixture.file, room)).length, 0);
+  });
+
+  test('empty without --room wipes every room', async () => {
+    const room = await trashFixture('trash-empty-all');
+
+    const { code } = await runCli(['trash', 'empty', '-d', dataDir()], {
+      input: 'DELETE EVERYTHING\n',
+    });
+
+    assert.equal(code, 0);
+    assert.equal((await readTrash(fixture.file, room)).length, 0);
+  });
+
+  test('an unknown action fails', async () => {
+    const room = await trashFixture('trash-bad');
+
+    const { code, stderr } = await runCli(['trash', 'nope', '-d', dataDir(), '-r', room]);
+
+    assert.equal(code, 1);
+    assert.match(stderr, /Unknown trash action/);
   });
 });
 

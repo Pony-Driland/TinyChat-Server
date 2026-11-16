@@ -16,6 +16,8 @@
         "test:watch": "node --test --watch test/tiny-chat-archive-cli.test.mjs",
         "chat:export": "node build/tiny-chat-archive-cli.js export",
         "chat:import": "node build/tiny-chat-archive-cli.js import",
+        "chat:restore": "node build/tiny-chat-archive-cli.js restore",
+        "chat:trash": "node build/tiny-chat-archive-cli.js trash",
         "chat:rooms": "node build/tiny-chat-archive-cli.js rooms",
         "chat:chapters": "node build/tiny-chat-archive-cli.js chapters",
         "prettier": "prettier --write ./src/api/* && prettier --write ./src/proxy/* && prettier --write ./build/* && prettier --write ./temp/*"

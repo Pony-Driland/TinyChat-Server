@@ -49,6 +49,23 @@ CREATE TABLE history (
   PRIMARY KEY (roomId, historyId),
   FOREIGN KEY (roomId) REFERENCES rooms(roomId) ON DELETE CASCADE
 );
+
+CREATE TABLE historyDeleted (
+  historyId TEXT,
+  roomId TEXT NOT NULL,
+  userId TEXT NOT NULL,
+  text TEXT NOT NULL,
+  date INTEGER NOT NULL,
+  chapter INTEGER NOT NULL,
+  model TEXT,
+  hash TEXT,
+  edited INTEGER,
+  tokens INTEGER,
+  errorCode TEXT,
+  isModel BOOLEAN DEFAULT 0,
+  PRIMARY KEY (roomId, historyId),
+  FOREIGN KEY (roomId) REFERENCES rooms(roomId) ON DELETE CASCADE
+);
 `;
 
 const CONFIG = `[server]
@@ -152,6 +169,48 @@ export async function seedMessages(file, rows) {
         'INSERT INTO history (roomId, userId, text, date, chapter, isModel, edited) VALUES (?, ?, ?, ?, ?, 0, 0)',
         [row.roomId ?? 'lobby', row.userId ?? 'admin', row.text, row.date, row.chapter ?? 1],
       );
+  } finally {
+    await close(db);
+  }
+}
+
+/**
+ * Inserts rows straight into the `historyDeleted` safety backup.
+ *
+ * @param {string} file
+ * @param {Array<{ roomId?: string, userId?: string, text: string, date: number, chapter?: number }>} rows
+ */
+export async function seedTrash(file, rows) {
+  const db = openDatabase(file);
+  try {
+    let index = 0;
+    for (const row of rows)
+      await run(
+        db,
+        'INSERT INTO historyDeleted (historyId, roomId, userId, text, date, chapter, isModel, edited) VALUES (?, ?, ?, ?, ?, ?, 0, 0)',
+        [
+          row.historyId ?? `trash-${row.roomId ?? 'lobby'}-${index++}`,
+          row.roomId ?? 'lobby',
+          row.userId ?? 'admin',
+          row.text,
+          row.date,
+          row.chapter ?? 1,
+        ],
+      );
+  } finally {
+    await close(db);
+  }
+}
+
+/** Reads every row of the `historyDeleted` safety backup of a room. */
+export async function readTrash(file, roomId = 'lobby') {
+  const db = openDatabase(file);
+  try {
+    return await all(
+      db,
+      'SELECT historyId, userId, text, date, chapter FROM historyDeleted WHERE roomId = ? ORDER BY date ASC',
+      [roomId],
+    );
   } finally {
     await close(db);
   }

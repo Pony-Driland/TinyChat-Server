@@ -29,6 +29,8 @@
  *   node build/tiny-chat-archive-cli.js import --room lobby --chapter 2 --file chat.json
  *   node build/tiny-chat-archive-cli.js rooms
  *   node build/tiny-chat-archive-cli.js chapters --room lobby
+ *   node build/tiny-chat-archive-cli.js restore --room lobby --limit 50
+ *   node build/tiny-chat-archive-cli.js trash purge --older-than 30
  *
  * Run with --help for the full list of options.
  */
@@ -91,6 +93,8 @@ ${color.bold('COMMANDS')}
   chapters      List every chapter of a room
   reset-password Reset the password of a user account
   migrate-usernames  Lowercase every user id and every row that references it
+  restore       Restore messages from the "historyDeleted" safety backup
+  trash         Inspect or clean the "historyDeleted" safety backup
 
 ${color.bold('OPTIONS')}
   -d, --data-dir <path>   Folder that contains config.ini and database.db
@@ -108,6 +112,19 @@ ${color.bold('OPTIONS')}
   -v, --version           Show the CLI version
   -u, --user <id>         User id (target of the command)
       --password <value>  New password (reset-password, random when omitted)
+
+${color.bold('TRASH / RESTORE OPTIONS')}
+  -n, --limit <n>         How many messages to act on (newest first)
+      --dates <n>         Act on every message of the N most recent days
+      --older-than <days> Only messages older than N days (trash purge)
+      --all               Select every message (no limit)
+      --overwrite         Restore even when the id already exists in history
+  -y, --yes               Skip the confirmation prompt (dangerous)
+
+${color.bold('TRASH COMMANDS')}
+  trash list              Show what the safety backup currently holds
+  trash purge             Delete the selected rows from the safety backup
+  trash empty             Delete the whole safety backup (every room)
 
 ${color.bold('IMPORT MODES')}
   merge     Insert new messages and skip the ones that already exist (default)
@@ -134,6 +151,18 @@ ${color.bold('EXAMPLES')}
 
   # reset a password to a known value
   node build/tiny-chat-archive-cli.js reset-password --user admin --password "hunter2hunter2hunter2"
+
+  # restore the 25 newest deleted messages of a room
+  node build/tiny-chat-archive-cli.js restore -r lobby --limit 25
+
+  # restore everything deleted in the last 7 days
+  node build/tiny-chat-archive-cli.js restore -r lobby --dates 7
+
+  # drop everything older than 30 days from the safety backup
+  node build/tiny-chat-archive-cli.js trash purge --older-than 30
+
+  # wipe the whole safety backup
+  node build/tiny-chat-archive-cli.js trash empty
 `;
 
 // -----------------------------------------------------------------------------
@@ -222,6 +251,22 @@ function parseArgs(argv) {
         break;
       case 'password':
         args.password = nextValue();
+        break;
+      case 'n':
+      case 'limit':
+        args.limit = nextValue();
+        break;
+      case 'dates':
+        args.dates = nextValue();
+        break;
+      case 'older-than':
+        args.olderThan = nextValue();
+        break;
+      case 'all':
+        args.all = true;
+        break;
+      case 'overwrite':
+        args.overwrite = true;
         break;
       default:
         throw new Error(`Unknown option: ${arg}`);
@@ -579,6 +624,128 @@ const createRepository = (adapter) => ({
       'SELECT userId FROM users WHERE userId != LOWER(userId) ORDER BY userId ASC',
       [],
     );
+  },
+
+  // ---------------------------------------------------------------------------
+  // Safety backup (historyDeleted)
+  // ---------------------------------------------------------------------------
+
+  /** Every room that still has rows in the safety backup. */
+  async listTrashRooms() {
+    return adapter.all(
+      'SELECT roomId, COUNT(*) AS total, MIN(date) AS oldest, MAX(date) AS newest FROM historyDeleted GROUP BY roomId ORDER BY roomId ASC',
+      [],
+    );
+  },
+
+  /** Every row of the safety backup of a room, newest first. */
+  async listTrash(roomId) {
+    return adapter.all(
+      'SELECT historyId, userId, text, date, chapter, model, hash, edited, tokens, errorCode, isModel FROM historyDeleted WHERE roomId = ? ORDER BY date DESC, historyId ASC',
+      [roomId],
+    );
+  },
+
+  /** Ids that already exist in `history` for the given room. */
+  async existingHistoryIds(roomId) {
+    const rows = await adapter.all('SELECT historyId FROM history WHERE roomId = ?', [roomId]);
+    return new Set(rows.map((row) => String(row.historyId)));
+  },
+
+  /**
+   * Moves rows from `historyDeleted` back to `history`.
+   *
+   * Everything runs inside a single transaction, so a failure can never
+   * duplicate or lose a message. Rows whose id already exists in `history` are
+   * skipped unless `overwrite` is set.
+   *
+   * @param {string} roomId
+   * @param {any[]} rows
+   * @param {{ overwrite?: boolean }} [options]
+   */
+  async restoreMessages(roomId, rows, options = {}) {
+    const overwrite = Boolean(options.overwrite);
+
+    return adapter.transaction(async (tx) => {
+      const existing = new Set(
+        (await tx.all('SELECT historyId FROM history WHERE roomId = ?', [roomId])).map((row) =>
+          String(row.historyId),
+        ),
+      );
+
+      const result = { restored: 0, overwritten: 0, skipped: 0 };
+      /** Rows that really moved back, so the backup only loses those. */
+      const moved = [];
+
+      for (const row of rows) {
+        const id = String(row.historyId);
+        const exists = existing.has(id);
+
+        if (exists && !overwrite) {
+          result.skipped++;
+          continue;
+        }
+
+        if (exists) {
+          await tx.run('DELETE FROM history WHERE roomId = ? AND historyId = ?', [roomId, id]);
+          result.overwritten++;
+        }
+
+        await tx.run(
+          'INSERT INTO history (historyId, roomId, userId, text, date, chapter, model, hash, edited, tokens, errorCode, isModel) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+          [
+            row.historyId,
+            roomId,
+            row.userId,
+            row.text,
+            row.date,
+            row.chapter,
+            row.model,
+            row.hash,
+            row.edited,
+            row.tokens,
+            row.errorCode,
+            row.isModel ? 1 : 0,
+          ],
+        );
+
+        existing.add(id);
+        moved.push(row);
+        result.restored++;
+      }
+
+      // Only the rows that really moved back leave the safety backup.
+      for (const row of moved)
+        await tx.run('DELETE FROM historyDeleted WHERE roomId = ? AND historyId = ? AND date = ?', [
+          roomId,
+          row.historyId,
+          row.date,
+        ]);
+
+      return result;
+    });
+  },
+
+  /** Deletes specific rows from the safety backup. */
+  async purgeTrash(roomId, rows) {
+    return adapter.transaction(async (tx) => {
+      let deleted = 0;
+      for (const row of rows) {
+        const result = await tx.run(
+          'DELETE FROM historyDeleted WHERE roomId = ? AND historyId = ? AND date = ?',
+          [roomId, row.historyId, row.date],
+        );
+        deleted += Number(result?.changes ?? result?.rowCount ?? 0) || 0;
+      }
+      return { deleted };
+    });
+  },
+
+  /** Empties the safety backup. Without a room, wipes every room. */
+  async emptyTrash(roomId) {
+    if (typeof roomId === 'string')
+      return adapter.run('DELETE FROM historyDeleted WHERE roomId = ?', [roomId]);
+    return adapter.run('DELETE FROM historyDeleted', []);
   },
 
   async migrateUsernamesToLowercase() {
@@ -1196,6 +1363,514 @@ async function commandMigrateUsernames(repository, prompt, args) {
 }
 
 // -----------------------------------------------------------------------------
+// Safety backup (historyDeleted) helpers
+// -----------------------------------------------------------------------------
+
+/** Formats a timestamp as `YYYY-MM-DD HH:mm:ss UTC`. */
+function formatDate(value) {
+  const date = new Date(Number(value));
+  if (Number.isNaN(date.getTime())) return 'invalid date';
+  return date
+    .toISOString()
+    .replace('T', ' ')
+    .replace(/\.\d{3}Z$/, ' UTC');
+}
+
+/** `YYYY-MM-DD` of a timestamp, used to group messages by day. */
+function dayKey(value) {
+  const date = new Date(Number(value));
+  return Number.isNaN(date.getTime()) ? 'invalid' : date.toISOString().slice(0, 10);
+}
+
+/** Shortens a message so the report stays readable. */
+function preview(text, size = 54) {
+  const value = String(text === null || typeof text === 'undefined' ? '' : text)
+    .replace(/\s+/g, ' ')
+    .trim();
+  return value.length > size ? `${value.slice(0, size - 1)}\u2026` : value;
+}
+
+/** Draws a horizontal rule with an optional title. */
+function rule(title) {
+  const line = '\u2500'.repeat(74);
+  console.log(color.dim(line));
+  if (title) console.log(color.bold(` ${title}`));
+  if (title) console.log(color.dim(line));
+}
+
+/**
+ * Applies the `--limit` / `--dates` / `--older-than` / `--all` selectors to the
+ * backup rows.
+ *
+ * `--limit <n>`      picks the N newest messages.
+ * `--dates <n>`      picks every message that belongs to the N most recent days.
+ * `--older-than <n>` picks every message older than N days.
+ * `--all`            picks everything.
+ *
+ * @param {any[]} rows
+ * @param {any} args
+ * @returns {{ rows: any[], description: string, days: string[] }}
+ */
+function selectTrashRows(rows, args) {
+  const hasLimit = typeof args.limit !== 'undefined';
+  const hasDates = typeof args.dates !== 'undefined';
+  const hasOlderThan = typeof args.olderThan !== 'undefined';
+  const chosen = [hasLimit, hasDates, hasOlderThan, Boolean(args.all)].filter(Boolean).length;
+
+  if (chosen === 0)
+    throw new Error(
+      'Choose the scope with --limit <n>, --dates <n>, --older-than <days> or --all.',
+    );
+  if (chosen > 1) throw new Error('Use only one of --limit, --dates, --older-than or --all.');
+
+  // Newest first, so `--limit` always keeps the most recent messages.
+  const ordered = [...rows].sort((a, b) => Number(b.date) - Number(a.date));
+
+  if (args.all) return { rows: ordered, description: 'every message', days: [] };
+
+  if (hasLimit) {
+    const limit = Number(args.limit);
+    if (!Number.isInteger(limit) || limit < 1)
+      throw new Error(`Invalid --limit: ${args.limit}. Use a positive integer.`);
+    return {
+      rows: ordered.slice(0, limit),
+      description: `the ${limit} newest message(s)`,
+      days: [],
+    };
+  }
+
+  if (hasOlderThan) {
+    const days = Number(args.olderThan);
+    if (!Number.isInteger(days) || days < 0)
+      throw new Error(`Invalid --older-than: ${args.olderThan}. Use a non-negative integer.`);
+
+    const cutoff = Date.now() - days * 86400000;
+    return {
+      rows: ordered.filter((row) => Number(row.date) < cutoff),
+      description: `messages older than ${days} day(s)`,
+      days: [],
+    };
+  }
+
+  const amount = Number(args.dates);
+  if (!Number.isInteger(amount) || amount < 1)
+    throw new Error(`Invalid --dates: ${args.dates}. Use a positive integer.`);
+
+  const allDays = [];
+  for (const row of ordered) {
+    const key = dayKey(row.date);
+    if (!allDays.includes(key)) allDays.push(key);
+  }
+
+  const days = allDays.slice(0, amount);
+  return {
+    rows: ordered.filter((row) => days.includes(dayKey(row.date))),
+    description: `the ${days.length} most recent date(s)`,
+    days,
+  };
+}
+
+/**
+ * Prints the full consequence report of a destructive action.
+ *
+ * @param {{ title: string, roomId: string, rows: any[], total: number, conflicts?: Set<string>, action: string[] }} options
+ */
+function printTrashReport(options) {
+  const { title, roomId, rows, total, conflicts, action } = options;
+
+  const dates = [...new Set(rows.map((row) => dayKey(row.date)))].sort();
+  const authors = new Map();
+  const chapters = new Map();
+
+  for (const row of rows) {
+    authors.set(row.userId, (authors.get(row.userId) || 0) + 1);
+    chapters.set(row.chapter, (chapters.get(row.chapter) || 0) + 1);
+  }
+
+  const sortedAuthors = [...authors.entries()].sort((a, b) => b[1] - a[1]);
+
+  console.log('');
+  rule(title);
+  console.log(`  Room ................: ${color.bold(roomId)}`);
+  console.log(
+    `  Messages affected ...: ${color.bold(String(rows.length))} of ${total} in the backup`,
+  );
+  console.log(`  Distinct dates ......: ${dates.length}`);
+  if (dates.length > 0)
+    console.log(`  Date range ..........: ${dates[0]} \u2192 ${dates[dates.length - 1]}`);
+  console.log(
+    `  Chapters ...........: ${
+      [...chapters.entries()]
+        .sort((a, b) => Number(a[0]) - Number(b[0]))
+        .map(([chapter, count]) => `${chapter} (${count})`)
+        .join(', ') || '-'
+    }`,
+  );
+  console.log(`  Authors ............: ${authors.size}`);
+
+  for (const [userId, count] of sortedAuthors.slice(0, 8))
+    console.log(color.dim(`      ${String(count).padStart(5)}x ${userId}`));
+  if (sortedAuthors.length > 8)
+    console.log(color.dim(`      ...and ${sortedAuthors.length - 8} more author(s)`));
+
+  if (conflicts && conflicts.size > 0)
+    console.log(
+      `  ${color.yellow('Conflicts')} ..........: ${conflicts.size} id(s) already exist in "history"`,
+    );
+
+  if (rows.length > 0) {
+    console.log(color.dim('  Preview:'));
+    for (const row of rows.slice(0, 5))
+      console.log(
+        color.dim(
+          `      ${dayKey(row.date)}  ${String(row.userId).padEnd(14)} ${preview(row.text)}`,
+        ),
+      );
+    if (rows.length > 5) console.log(color.dim(`      ...and ${rows.length - 5} more message(s)`));
+  }
+
+  rule();
+  console.log(color.bold('  This action will:'));
+  for (const line of action) console.log(`    \u2022 ${line}`);
+  rule();
+}
+
+/**
+ * Asks the user to type a word before running a destructive action.
+ *
+ * @param {{ ask: (question: string) => Promise<string> }} prompt
+ * @param {string} expected
+ * @param {string} question
+ */
+async function confirmDanger(prompt, expected, question) {
+  const answer = await prompt.ask(
+    `\n${question}\n  ${color.bold(`Type "${expected}" to continue:`)} `,
+  );
+  return answer.trim() === expected;
+}
+
+/** Restores messages from `historyDeleted` back to `history`. */
+async function commandRestore(repository, prompt, args) {
+  const room = await resolveRoom(repository, prompt, args.room);
+  const backup = await repository.listTrash(room.roomId);
+
+  if (backup.length === 0) {
+    log.warn(`The safety backup of "${room.roomId}" is empty. Nothing to restore.`);
+    return;
+  }
+
+  const selection = selectTrashRows(backup, args);
+
+  if (selection.rows.length === 0) {
+    log.warn('The selection is empty. Nothing to restore.');
+    return;
+  }
+
+  const existing = await repository.existingHistoryIds(room.roomId);
+  const conflicts = new Set(
+    selection.rows
+      .filter((row) => existing.has(String(row.historyId)))
+      .map((row) => String(row.historyId)),
+  );
+
+  const action = [
+    `Copy ${selection.rows.length} message(s) from "historyDeleted" back to "history".`,
+    'Remove the restored rows from the safety backup.',
+    conflicts.size > 0
+      ? args.overwrite
+        ? `Overwrite ${conflicts.size} message(s) that already exist in "history".`
+        : `Skip ${conflicts.size} message(s) that already exist in "history" (use --overwrite to replace).`
+      : 'No id conflicts were found.',
+    'This is a write operation on the live database. Back it up first.',
+  ];
+
+  if (args.json) {
+    const preview = {
+      success: true,
+      dryRun: Boolean(args.dryRun) || !args.yes,
+      roomId: room.roomId,
+      available: backup.length,
+      selected: selection.rows.length,
+      conflicts: conflicts.size,
+      overwrite: Boolean(args.overwrite),
+    };
+
+    if (args.dryRun || !args.yes) {
+      console.log(JSON.stringify(preview, null, 2));
+      return;
+    }
+
+    const result = await repository.restoreMessages(room.roomId, selection.rows, {
+      overwrite: args.overwrite,
+    });
+    console.log(JSON.stringify({ ...preview, ...result }, null, 2));
+    return;
+  }
+
+  printTrashReport({
+    title: 'RESTORE FROM SAFETY BACKUP',
+    roomId: room.roomId,
+    rows: selection.rows,
+    total: backup.length,
+    conflicts,
+    action,
+  });
+
+  if (args.dryRun) {
+    log.warn('[dry-run] Nothing was written to the database.');
+    return;
+  }
+
+  if (!args.yes) {
+    const confirmed = await confirmDanger(prompt, 'restore', 'Restore these messages?');
+    if (!confirmed) return log.warn('Restore cancelled. Nothing was changed.');
+  }
+
+  const result = await repository.restoreMessages(room.roomId, selection.rows, {
+    overwrite: args.overwrite,
+  });
+
+  log.success(
+    `Restored ${color.bold(result.restored)} message(s) to "${room.roomId}"` +
+      (result.overwritten > 0 ? ` (${result.overwritten} overwritten)` : '') +
+      (result.skipped > 0 ? `, ${result.skipped} skipped` : '') +
+      '.',
+  );
+}
+
+/** Lists and cleans the `historyDeleted` safety backup. */
+async function commandTrash(repository, prompt, args) {
+  const action = (args._[1] || 'list').toLowerCase();
+
+  if (!['list', 'purge', 'empty'].includes(action))
+    throw new Error(`Unknown trash action: ${action}. Use list, purge or empty.`);
+
+  // `trash empty` without --room wipes every room at once.
+  if (action === 'empty' && !args.room) return emptyEveryRoom(repository, prompt, args);
+
+  const room = await resolveRoom(repository, prompt, args.room);
+  const backup = await repository.listTrash(room.roomId);
+
+  if (backup.length === 0) {
+    log.warn(`The safety backup of "${room.roomId}" is already empty.`);
+    return;
+  }
+
+  if (action === 'list') return listTrash(room, backup, args);
+
+  if (action === 'empty') {
+    return emptyTrashRoom(repository, prompt, args, room, backup);
+  }
+
+  return purgeTrash(repository, prompt, args, room, backup);
+}
+
+/** `trash list` */
+function listTrash(room, backup, args) {
+  if (args.json) {
+    console.log(
+      JSON.stringify(
+        {
+          roomId: room.roomId,
+          total: backup.length,
+          dates: [...new Set(backup.map((row) => dayKey(row.date)))].sort(),
+          messages: backup.map((row) => ({
+            id: row.historyId,
+            user: row.userId,
+            date: row.date,
+            chapter: row.chapter,
+            text: row.text,
+          })),
+        },
+        null,
+        2,
+      ),
+    );
+    return;
+  }
+
+  printTrashReport({
+    title: 'SAFETY BACKUP CONTENTS',
+    roomId: room.roomId,
+    rows: backup,
+    total: backup.length,
+    action: [
+      'This is a read-only report. Nothing was changed.',
+      'Use "trash purge" to delete a selection or "trash empty" to wipe the backup.',
+    ],
+  });
+}
+
+/** `trash purge` */
+async function purgeTrash(repository, prompt, args, room, backup) {
+  const selection = selectTrashRows(backup, args);
+
+  if (selection.rows.length === 0) {
+    log.warn('The selection is empty. Nothing to purge.');
+    return;
+  }
+
+  if (args.json) {
+    if (args.dryRun || !args.yes) {
+      console.log(
+        JSON.stringify(
+          {
+            success: true,
+            dryRun: true,
+            roomId: room.roomId,
+            available: backup.length,
+            selected: selection.rows.length,
+          },
+          null,
+          2,
+        ),
+      );
+      return;
+    }
+
+    const result = await repository.purgeTrash(room.roomId, selection.rows);
+    console.log(
+      JSON.stringify({ success: true, roomId: room.roomId, deleted: result.deleted }, null, 2),
+    );
+    return;
+  }
+
+  printTrashReport({
+    title: 'PERMANENTLY DELETE FROM THE SAFETY BACKUP',
+    roomId: room.roomId,
+    rows: selection.rows,
+    total: backup.length,
+    action: [
+      `Permanently delete ${selection.rows.length} message(s) from "historyDeleted".`,
+      'These messages will NOT be recoverable. There is no undo.',
+      'The "history" table is not touched by this command.',
+    ],
+  });
+
+  if (args.dryRun) {
+    log.warn('[dry-run] Nothing was deleted.');
+    return;
+  }
+
+  if (!args.yes) {
+    const confirmed = await confirmDanger(prompt, 'delete', 'Permanently delete these messages?');
+    if (!confirmed) return log.warn('Purge cancelled. Nothing was deleted.');
+  }
+
+  const result = await repository.purgeTrash(room.roomId, selection.rows);
+  log.success(`Deleted ${color.bold(result.deleted)} message(s) from the safety backup.`);
+}
+
+/** `trash empty --room <id>` */
+async function emptyTrashRoom(repository, prompt, args, room, backup) {
+  if (args.json) {
+    if (args.dryRun || !args.yes) {
+      console.log(
+        JSON.stringify(
+          { success: true, dryRun: true, roomId: room.roomId, total: backup.length },
+          null,
+          2,
+        ),
+      );
+      return;
+    }
+
+    await repository.emptyTrash(room.roomId);
+    console.log(
+      JSON.stringify({ success: true, roomId: room.roomId, deleted: backup.length }, null, 2),
+    );
+    return;
+  }
+
+  printTrashReport({
+    title: 'EMPTY THE SAFETY BACKUP OF A ROOM',
+    roomId: room.roomId,
+    rows: backup,
+    total: backup.length,
+    action: [
+      `Permanently delete ALL ${backup.length} message(s) of "${room.roomId}".`,
+      'These messages will NOT be recoverable. There is no undo.',
+    ],
+  });
+
+  if (args.dryRun) {
+    log.warn('[dry-run] Nothing was deleted.');
+    return;
+  }
+
+  if (!args.yes) {
+    const confirmed = await confirmDanger(prompt, room.roomId, 'Empty this backup?');
+    if (!confirmed) return log.warn('Operation cancelled. Nothing was deleted.');
+  }
+
+  await repository.emptyTrash(room.roomId);
+  log.success(`Emptied the safety backup of "${room.roomId}" (${backup.length} message(s)).`);
+}
+
+/** `trash empty` without `--room`: wipes every room. */
+async function emptyEveryRoom(repository, prompt, args) {
+  const rooms = await repository.listTrashRooms();
+
+  if (rooms.length === 0) {
+    log.success('The safety backup is already empty.');
+    return;
+  }
+
+  const total = rooms.reduce((sum, room) => sum + Number(room.total), 0);
+
+  if (args.json) {
+    if (args.dryRun || !args.yes) {
+      console.log(
+        JSON.stringify(
+          {
+            success: true,
+            dryRun: true,
+            rooms: rooms.map((room) => ({ roomId: room.roomId, total: Number(room.total) })),
+            total,
+          },
+          null,
+          2,
+        ),
+      );
+      return;
+    }
+
+    await repository.emptyTrash();
+    console.log(JSON.stringify({ success: true, deleted: total }, null, 2));
+    return;
+  }
+
+  console.log('');
+  rule('WIPE THE ENTIRE SAFETY BACKUP');
+  console.log(`  Rooms affected ......: ${color.bold(String(rooms.length))}`);
+  console.log(`  Messages affected ...: ${color.bold(String(total))}`);
+  console.log('');
+  for (const room of rooms)
+    console.log(
+      `      ${String(room.roomId).padEnd(24)} ${String(room.total).padStart(6)} message(s)`,
+    );
+  rule();
+  console.log(color.bold('  This action will:'));
+  console.log('    \u2022 Permanently delete EVERY row of "historyDeleted", from EVERY room.');
+  console.log('    \u2022 Make all of these messages unrecoverable. There is no undo.');
+  console.log('    \u2022 Not touch the "history" table.');
+  rule();
+
+  if (args.dryRun) {
+    log.warn('[dry-run] Nothing was deleted.');
+    return;
+  }
+
+  if (!args.yes) {
+    const confirmed = await confirmDanger(prompt, 'DELETE EVERYTHING', 'Wipe the whole backup?');
+    if (!confirmed) return log.warn('Operation cancelled. Nothing was deleted.');
+  }
+
+  await repository.emptyTrash();
+  log.success(`Deleted ${color.bold(total)} message(s) from the safety backup.`);
+}
+
+// -----------------------------------------------------------------------------
 // Entry point
 // -----------------------------------------------------------------------------
 
@@ -1209,9 +1884,16 @@ async function main() {
   if (!command) return console.log(HELP);
 
   if (
-    !['export', 'import', 'rooms', 'chapters', 'reset-password', 'migrate-usernames'].includes(
-      command,
-    )
+    ![
+      'export',
+      'import',
+      'rooms',
+      'chapters',
+      'reset-password',
+      'migrate-usernames',
+      'restore',
+      'trash',
+    ].includes(command)
   )
     throw new Error(`Unknown command: ${command}`);
 
@@ -1236,6 +1918,8 @@ async function main() {
       await commandResetPassword(repository, prompt, args, config);
     else if (command === 'migrate-usernames')
       await commandMigrateUsernames(repository, prompt, args);
+    else if (command === 'restore') await commandRestore(repository, prompt, args);
+    else if (command === 'trash') await commandTrash(repository, prompt, args);
   } finally {
     prompt.close();
     await adapter.close();
