@@ -1,243 +1,293 @@
-# API Documentation
+# User Manager — Socket.IO API
 
-This document provides an overview of the events handled by the server, including user management actions such as banning, unbanning, kicking, logging in, and registration.
+This document describes every Socket.IO event handled by
+[`userManager.js`](./userManager.js): authentication, account settings, server staff and the
+server-wide moderation tools.
 
-Documentation written with the assistance of OpenAI's ChatGPT.
+Every handler follows the same contract:
 
----
+- the payload is a plain object (`noDataInfo` rejects anything else);
+- the last argument is the **acknowledgment callback** (`fn`);
+- failures answer `{ error: true, msg: string, code: number }`;
+- every event is throttled by `userIsRateLimited` (`limits.EVENT`).
 
-## Events Overview
+## Roles
 
-### 1. `ban`
+| Role                           | How it is granted                  |
+| ------------------------------ | ---------------------------------- |
+| **Server owner**               | `genesis.owner_id` in `config.ini` |
+| **Server staff** (`moderator`) | Row in the `moderators` table      |
+| **Regular user**               | Any other account                  |
 
-#### Description:
-
-This event allows the server owner or moderators to ban a user from the server. The user will be disconnected, and their information will be added to the ban list.
-
-#### Arguments:
-
-- `userId` (string): The ID of the user to ban.
-- `reason` (string): The reason for the ban.
-
-#### Callback:
-
-- Success: `{ success: true }`
-- Error: `{ error: true, msg: string, code: number }`
-
-#### Behavior:
-
-- Validates the `userId` and `reason`.
-- Checks if the sender is logged in and not rate-limited.
-- Ensures the sender is either the server owner or a moderator.
-- Disconnects the banned user and adds them to the ban list.
+`isServerStaff()` in [`values.js`](./values.js) is the single source of truth and is what the
+`isStaff` badge in `user-joined` uses.
 
 ---
 
-### 2. `unban`
+## Authentication
 
-#### Description:
+### `register`
 
-This event allows the server owner or moderators to remove a user from the ban list, allowing them to reconnect.
+Creates a new account.
 
-#### Arguments:
+```json
+{ "userId": "alice", "password": "hunter2hunter2hunter2", "nickname": "Alice" }
+```
 
-- `userId` (string): The ID of the user to unban.
+**Response**
 
-#### Callback:
+```json
+{ "userId": "alice", "nickname": "Alice" }
+```
 
-- Success: `{ success: true }`
-- Error: `{ error: true, msg: string, code: number }`
+**Rules**
 
-#### Behavior:
+- `userId` must be **lowercase** — otherwise the request fails with code `5`.
+- When `server.registration_open = false`, only the server owner can create accounts.
+- The password must respect `limits.MIN_PASSWORD_SIZE`.
+- The id is truncated to `limits.USER_ID_SIZE` and the nickname to `limits.NICKNAME_SIZE`.
 
-- Validates the `userId`.
-- Checks if the sender is logged in and not rate-limited.
-- Ensures the sender is either the server owner or a moderator.
-- Removes the user from the ban list.
+**Errors**
 
----
-
-### 3. `kick`
-
-#### Description:
-
-This event allows the server owner or moderators to kick a user from the server. The user will be disconnected, but they can rejoin later.
-
-#### Arguments:
-
-- `userId` (string): The ID of the user to kick.
-
-#### Callback:
-
-- Success: `{ success: true }`
-- Error: `{ error: true, msg: string, code: number }`
-
-#### Behavior:
-
-- Validates the `userId`.
-- Checks if the sender is logged in and not rate-limited.
-- Ensures the sender is either the server owner or a moderator.
-- Disconnects the user.
+| Code | Meaning                                                 |
+| ---- | ------------------------------------------------------- |
+| `1`  | User id already exists                                  |
+| `2`  | Only the owner can create accounts                      |
+| `3`  | Password does not have the minimum number of characters |
+| `4`  | User id does not have the minimum number of characters  |
+| `5`  | User id must be lowercase                               |
 
 ---
 
-### 4. `change-password`
+### `login`
 
-#### Description:
+```json
+{ "userId": "alice", "password": "hunter2hunter2hunter2" }
+```
 
-This event allows a logged-in user to change their password.
+**Response**
 
-#### Arguments:
+```json
+{
+  "userId": "alice",
+  "nickname": "Alice",
+  "isAdmin": false,
+  "isMod": false,
+  "ratelimit": {},
+  "dice": {}
+}
+```
 
-- `password` (string): The new password.
-- `oldPassword` (string): The current password.
+`ratelimit` is the payload of `getRateLimit()` (sizes, limits and dice limits), so the client can
+validate the forms without an extra request.
 
-#### Callback:
+**Rules**
 
-- Success: `{ success: true }`
-- Error: `{ error: true, msg: string, code: number }`
+- Banned accounts are rejected **before** the password check, and the response carries `reason` and
+  `date`.
+- The lookup ignores the id casing (`findUser`), so legacy rows still work.
+- The server owner and the staff bypass the `limits.MAX_ONLINE_ACCOUNTS` limit.
 
-#### Behavior:
+**Errors**
 
-- Validates the `password`.
-- Checks if the sender is logged in and not rate-limited.
-- Updates the user's password after hashing it.
-
----
-
-### 5. `change-nickname`
-
-#### Description:
-
-This event allows a logged-in user to change their nickname.
-
-#### Arguments:
-
-- `nickname` (string): The new nickname.
-
-#### Callback:
-
-- Success: `{ nickname: string }`
-- Error: `{ error: true, msg: string, code: number }`
-
-#### Behavior:
-
-- Validates the `nickname`.
-- Checks if the sender is logged in and not rate-limited.
-- Updates the user's nickname.
-- Sends the user's nickname update to all rooms using the event `user-updated`.
+| Code | Meaning                                                  |
+| ---- | -------------------------------------------------------- |
+| `1`  | Invalid user credentials                                 |
+| `2`  | User does not exist                                      |
+| `3`  | The account is already in use                            |
+| `4`  | You're already logged in                                 |
+| `5`  | You're banned (also returns `reason` and `date`)         |
+| `6`  | The server reached the maximum number of online accounts |
 
 ---
 
-### 6. `register`
+### `disconnect`
 
-#### Description:
-
-This event allows a new user to register an account on the server.
-
-#### Arguments:
-
-- `userId` (string): The desired user ID.
-- `password` (string): The desired password.
-- `nickname` (string): The desired nickname.
-
-#### Callback:
-
-- Success: `{ userId: string, nickname: string }`
-- Error: `{ error: true, msg: string, code: number }`
-
-#### Behavior:
-
-- Validates the `userId`, `password`, and `nickname`.
-- Checks if registration is open and if the sender is the server owner.
-- Creates a new user account if the user ID is not already taken.
+Not emitted by the client. Leaves every room the socket was in and removes the socket from
+`userSockets`.
 
 ---
 
-### 7. `login`
+## Account settings
 
-#### Description:
+### `change-password`
 
-This event allows an existing user to log in using their credentials.
+```json
+{ "oldPassword": "old-password", "password": "new-password" }
+```
 
-#### Arguments:
+**Errors**
 
-- `userId` (string): The user ID.
-- `password` (string): The password.
-
-#### Callback:
-
-- Success: `{ userId: string, nickname: string }`
-- Error: `{ error: true, msg: string, code: number }`
-
-#### Behavior:
-
-- Validates the `userId` and `password`.
-- Checks if the user is banned.
-- Ensures the user is not already logged in or using the account elsewhere.
-- Sets up the user's session and stores their connection in `userSockets`.
+| Code | Meaning                                                         |
+| ---- | --------------------------------------------------------------- |
+| `1`  | The new password does not have the minimum number of characters |
+| `2`  | Your current password is incorrect                              |
 
 ---
 
-### 8. `user-is-mod`
+### `change-nickname`
 
-#### Description:
+```json
+{ "nickname": "Alice" }
+```
 
-This event checks if a specific user is a moderator.
-It can also return additional moderator details when requested by another moderator or the server owner.
+**Response**
 
-#### Arguments:
+```json
+{ "nickname": "Alice" }
+```
 
-- `userId` (string): The ID of the user to check.
+Broadcasts `user-updated` to every room the account is in:
 
-#### Callback:
+```json
+{ "roomId": "lobby", "userId": "alice", "data": { "nickname": "Alice" } }
+```
 
-- Success (user is moderator):
-  `{ result: true, isOwner: boolean, date?: string, reason?: string }`
-  The optional `date` and `reason` fields are only returned if the requester is a moderator or the server owner.
-- Success (user is not moderator):
-  `{ result: false, isOwner: boolean }`
-- Error: `{ error: true, msg: string, code: number }`
-
-#### Behavior:
-
-- Validates the `userId`.
-- Ensures the requester is logged in and not rate-limited.
-- Queries the `moderators` table for both the requester and the target user.
-- If the target user is a moderator, returns `{ result: true, isOwner: boolean }`.
-- If the requester is a moderator or the owner, includes `date` and `reason` metadata about the moderator status.
-- Otherwise, returns `{ result: false, isOwner: boolean }` if the user is not found among moderators.
+The nickname is truncated to `limits.NICKNAME_SIZE`.
 
 ---
 
-### 9. `user-is-owner`
+## Lookups
 
-#### Description:
+### `user-is-mod`
 
-This event checks if a given user is the server owner.
+```json
+{ "userId": "bob" }
+```
 
-#### Arguments:
+**Response**
 
-- `userId` (string): The ID of the user to check.
+```json
+{ "result": true, "isOwner": false, "date": 1730419200000, "reason": null }
+```
 
-#### Callback:
-
-- Success: `{ result: boolean }`
-  - `true` if the user is the owner.
-  - `false` otherwise.
-
-- Error: `{ error: true, msg: string, code: number }`
-
-#### Behavior:
-
-- Validates the `userId`.
-- Ensures the requester is logged in and not rate-limited.
-- Compares the `userId` against the configured `OWNER_ID` from the server settings.
-- Returns the result as a boolean flag.
+`date` and `reason` are only included when the **caller** is the server owner or a moderator.
 
 ---
 
-## Conclusion
+### `user-is-owner`
 
-This API provides comprehensive user management functionality, covering registration, authentication, moderation tools (ban, unban, kick), and permission checks (owner/moderator detection).
-All operations include input validation, rate-limiting protection, and role-based access control to maintain a secure and consistent environment for both users and administrators.
+```json
+{ "userId": "alice" }
+```
+
+**Response**
+
+```json
+{ "result": false }
+```
+
+---
+
+## Server staff
+
+### `add-mod`
+
+Promotes an account to server staff. **Only the server owner** can call it.
+
+```json
+{ "userId": "bob" }
+```
+
+**Broadcast — `user-staff-updated`** (one per room the account is in)
+
+```json
+{ "roomId": "lobby", "userId": "bob", "isStaff": true }
+```
+
+**Errors**
+
+| Code | Meaning                                                        |
+| ---- | -------------------------------------------------------------- |
+| `1`  | Only the owner is allowed to perform this action (`ownerOnly`) |
+| `2`  | User not found                                                 |
+
+---
+
+### `remove-mod`
+
+Demotes an account. **Only the server owner** can call it.
+
+```json
+{ "userId": "bob" }
+```
+
+Broadcasts `user-staff-updated` with `isStaff: false`.
+
+**Errors**
+
+| Code | Meaning                                                        |
+| ---- | -------------------------------------------------------------- |
+| `1`  | Only the owner is allowed to perform this action (`ownerOnly`) |
+
+---
+
+## Moderation
+
+### `ban`
+
+Bans an account and disconnects it immediately. Available to the server owner and the staff.
+
+```json
+{ "userId": "bob", "reason": "spam" }
+```
+
+**Rules**
+
+- The server owner can never be banned.
+- The row is written to the `banned` table with `date` and `reason`.
+
+**Errors**
+
+| Code | Meaning                           |
+| ---- | --------------------------------- |
+| `1`  | You are not allowed to do this    |
+| `2`  | User not found                    |
+| `3`  | The server owner cannot be banned |
+
+---
+
+### `unban`
+
+```json
+{ "userId": "bob" }
+```
+
+**Errors**
+
+| Code | Meaning                        |
+| ---- | ------------------------------ |
+| `1`  | You are not allowed to do this |
+| `2`  | User not found                 |
+
+---
+
+### `kick`
+
+Accepts a single id or an array of ids.
+
+```json
+{ "userId": ["bob", "carol"] }
+```
+
+**Response**
+
+```json
+{ "success": true, "data": [{ "success": true }] }
+```
+
+**Errors**
+
+| Code | Meaning                                   |
+| ---- | ----------------------------------------- |
+| `1`  | You are not allowed to do this            |
+| `2`  | User not found (per entry, inside `data`) |
+
+---
+
+## Events emitted
+
+| Event                | Sent to | Description                      |
+| -------------------- | ------- | -------------------------------- |
+| `user-updated`       | rooms   | The nickname changed             |
+| `user-staff-updated` | rooms   | The account was promoted/demoted |

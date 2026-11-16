@@ -1,6 +1,6 @@
 # 📦 Chat Archive CLI
 
-Command line tool to **export** and **import** the TinyChat conversation history using a simple, readable JSON file.
+Command line tool to **export**, **import**, **restore** and **repair** the TinyChat database using a simple, readable JSON file.
 
 Use it when you need to:
 
@@ -8,6 +8,8 @@ Use it when you need to:
 - **Migrate** conversations between servers/databases
 - **Edit** messages in bulk in your favorite editor
 - **Import** an already written script/roleplay
+- **Recover** messages deleted by accident (safety backup)
+- **Reset a password** or **normalize user ids** without opening the database
 
 ---
 
@@ -23,6 +25,8 @@ Use it when you need to:
   - [import](#import)
   - [restore](#restore)
   - [trash](#trash)
+  - [reset-password](#reset-password)
+  - [migrate-usernames](#migrate-usernames)
 - [Interactive selection](#-interactive-selection)
 - [Import modes](#-import-modes)
 - [Global options](#-global-options)
@@ -43,7 +47,7 @@ node build/tiny-chat-archive-cli.js --help
 
 ### Option 2 — Executable (recommended)
 
-The file already has the *shebang* and the execution permission:
+The file already has the _shebang_ and the execution permission:
 
 ```bash
 ./build/tiny-chat-archive-cli.js --help
@@ -59,13 +63,25 @@ npm link
 tiny-rpg-chat-archive --help
 ```
 
-### Option 4 — npm shortcuts
+### Option 4 — Unified launcher (`--app archive`)
+
+The launcher bundles the server, the proxy and the archive CLI behind a single
+binary:
+
+```bash
+tiny-chat-all --app archive rooms
+tiny-chat-all --app archive export --room lobby --chapter all --file lobby.json
+```
+
+### Option 5 — npm shortcuts
 
 ```bash
 yarn chat:rooms
 yarn chat:chapters --room lobby
 yarn chat:export --room lobby --chapter all --file lobby.json
 yarn chat:import --room lobby --chapter 2 --file lobby.json
+yarn chat:restore --room lobby --limit 25
+yarn chat:trash list --room lobby
 ```
 
 > **Requirements:** Node.js 20+ and the dependencies installed (`yarn install`).
@@ -76,7 +92,7 @@ yarn chat:import --room lobby --chapter 2 --file lobby.json
 
 ```bash
 # 1. See which rooms exist
-tiny-rpg-chat-archive rooms
+ tiny-rpg-chat-archive rooms
 
 # 2. See the chapters of a room
 tiny-rpg-chat-archive chapters --room lobby
@@ -105,19 +121,19 @@ The JSON is an **array of messages**:
 ]
 ```
 
-| Field | Type | Required | Description |
-|---|---|---|---|
-| `message` | `string` | ✅ | Message text |
-| `time` | `number` | ✅ | Timestamp in **milliseconds** (`Date.now()`) |
-| `id` | `string` | ➖ | Message ID. If missing, a random one is generated |
-| `user` | `string` | ✅ | Author ID |
-| `chapter` | `number` | ➖ | Only used on import with `--chapter all` |
-| `isModel` | `boolean` | ➖ | Marks the message as AI generated |
-| `model` | `string` | ➖ | Model that produced the message |
-| `hash` | `string` | ➖ | Content hash stored by the server |
-| `edited` | `number` | ➖ | Last edit timestamp (`0` when never edited) |
-| `tokens` | `number` | ➖ | Token count reported by the model |
-| `errorCode` | `string` | ➖ | Error code when the generation failed |
+| Field       | Type      | Required | Description                                       |
+| ----------- | --------- | -------- | ------------------------------------------------- |
+| `message`   | `string`  | ✅       | Message text                                      |
+| `time`      | `number`  | ✅       | Timestamp in **milliseconds** (`Date.now()`)      |
+| `id`        | `string`  | ➖       | Message ID. If missing, a random one is generated |
+| `user`      | `string`  | ✅       | Author ID                                         |
+| `chapter`   | `number`  | ➖       | Only used on import with `--chapter all`          |
+| `isModel`   | `boolean` | ➖       | Marks the message as AI generated                 |
+| `model`     | `string`  | ➖       | Model that produced the message                   |
+| `hash`      | `string`  | ➖       | Content hash stored by the server                 |
+| `edited`    | `number`  | ➖       | Last edit timestamp (`0` when never edited)       |
+| `tokens`    | `number`  | ➖       | Token count reported by the model                 |
+| `errorCode` | `string`  | ➖       | Error code when the generation failed             |
 
 > **Tip:** the `id` field is what prevents duplicates. Keep it when editing the file by hand.
 
@@ -140,6 +156,17 @@ tiny-rpg-chat-archive import -r lobby -c 1 -f lobby.json --minimal
 ---
 
 ## 🛠️ Commands
+
+| Command             | Description                                               |
+| ------------------- | --------------------------------------------------------- |
+| `rooms`             | Lists every room of the database                          |
+| `chapters`          | Lists the chapters of a room                              |
+| `export`            | Writes a chapter (or every chapter) to a JSON file        |
+| `import`            | Reads a JSON file into a chapter                          |
+| `restore`           | Copies rows from `historyDeleted` back to `history`       |
+| `trash`             | Inspects and cleans the `historyDeleted` safety backup    |
+| `reset-password`    | Resets the password of an account                         |
+| `migrate-usernames` | Lowercases every user id and every row that references it |
 
 ### `rooms`
 
@@ -185,14 +212,16 @@ Exports one chapter (or all of them) to JSON.
 tiny-rpg-chat-archive export [options]
 ```
 
-| Option | Description |
-|---|---|
-| `-r, --room <id>` | Source room (asks if omitted) |
-| `-c, --chapter <n\|all>` | Chapter or `all` (asks if omitted) |
-| `-f, --file <path>` | Output file (default: `chat-<room>-<chapter>.json`) |
-| `--compact` | JSON without indentation |
-| `--minimal` | Exports only `message`, `time`, `id` and `user` |
-| `--dry-run` | Only shows what would be done |
+| Option                   | Description                                            |
+| ------------------------ | ------------------------------------------------------ |
+| `-r, --room <id>`        | Source room (asks if omitted)                          |
+| `-c, --chapter <n\|all>` | Chapter or `all` (asks if omitted)                     |
+| `-f, --file <path>`      | Output file (default: `chat-<room>-<chapter>.json`)    |
+| `--pretty`               | JSON with indentation (default)                        |
+| `--compact`              | JSON without indentation                               |
+| `--minimal`              | Exports only `message`, `time`, `id` and `user`        |
+| `--dry-run`              | Only shows what would be done                          |
+| `--json`                 | Prints a JSON report instead of the human readable one |
 
 ```bash
 # Specific chapter
@@ -200,6 +229,9 @@ tiny-rpg-chat-archive export -r lobby -c 2 -f chapter2.json
 
 # Everything in a single file
 tiny-rpg-chat-archive export -r lobby -c all -f lobby-full.json
+
+# Smallest possible file
+ tiny-rpg-chat-archive export -r lobby -c all -f lobby.json --minimal --compact
 ```
 
 ---
@@ -212,15 +244,16 @@ Imports a JSON into a chapter.
 tiny-rpg-chat-archive import [options]
 ```
 
-| Option | Description |
-|---|---|
-| `-f, --file <path>` | **Required.** Input JSON file |
-| `-r, --room <id>` | Target room (asks if omitted) |
-| `-c, --chapter <n\|all>` | Target chapter. Accepts a new number |
-| `-m, --mode <mode>` | `merge` (default), `replace` or `upsert` |
-| `-y, --yes` | Do not ask for confirmation |
-| `--minimal` | Ignores the optional metadata columns in the file |
-| `--dry-run` | Validates and prints the summary without writing |
+| Option                   | Description                                       |
+| ------------------------ | ------------------------------------------------- |
+| `-f, --file <path>`      | **Required.** Input JSON file                     |
+| `-r, --room <id>`        | Target room (asks if omitted)                     |
+| `-c, --chapter <n\|all>` | Target chapter. Accepts a new number              |
+| `-m, --mode <mode>`      | `merge` (default), `replace` or `upsert`          |
+| `-y, --yes`              | Do not ask for confirmation                       |
+| `--minimal`              | Ignores the optional metadata columns in the file |
+| `--dry-run`              | Validates and prints the summary without writing  |
+| `--json`                 | Machine readable output (implies no prompt)       |
 
 ```bash
 # Safe import: only adds what is missing
@@ -253,34 +286,36 @@ want after an accidental delete, a bad moderation action or a failed purge.
 tiny-rpg-chat-archive restore [options]
 ```
 
-| Option | Description |
-|---|---|
-| `-r, --room <id>` | Room to restore into (asks if omitted) |
-| `-n, --limit <n>` | Restore the **n newest** messages |
-| `--dates <n>` | Restore every message from the **n most recent days** |
-| `--all` | Restore the whole backup of the room |
-| `--overwrite` | Replace rows that already exist in `history` |
-| `--dry-run` | Print the report without writing |
-| `-y, --yes` | Skip the confirmation (for scripts) |
+| Option            | Description                                           |
+| ----------------- | ----------------------------------------------------- |
+| `-r, --room <id>` | Room to restore into (asks if omitted)                |
+| `-n, --limit <n>` | Restore the **n newest** messages                     |
+| `--dates <n>`     | Restore every message from the **n most recent days** |
+| `--all`           | Restore the whole backup of the room                  |
+| `--overwrite`     | Replace rows that already exist in `history`          |
+| `--dry-run`       | Print the report without writing                      |
+| `-y, --yes`       | Skip the confirmation (for scripts)                   |
+
+> Exactly **one** of `--limit`, `--dates`, `--all` is required. Passing none (or more than one) is an error.
 
 ```bash
 # The 25 most recent deleted messages
- tiny-rpg-chat-archive restore -r lobby --limit 25
+tiny-rpg-chat-archive restore -r lobby --limit 25
 
 # Everything deleted in the last 7 days
- tiny-rpg-chat-archive restore -r lobby --dates 7
+tiny-rpg-chat-archive restore -r lobby --dates 7
 
 # The whole backup, replacing duplicated ids
- tiny-rpg-chat-archive restore -r lobby --all --overwrite
+tiny-rpg-chat-archive restore -r lobby --all --overwrite
 ```
 
 Before touching anything the CLI prints a **full report** of the consequences and asks you to type
 `restore`:
 
 ```
-───────────────────────────────────────────────────────────────────────────────
+──────────────────────────────────────────────────────────────────────────────
  RESTORE FROM SAFETY BACKUP
-───────────────────────────────────────────────────────────────────────────────
+──────────────────────────────────────────────────────────────────────────────
   Room ................: lobby
   Messages affected ...: 2 of 6 in the backup
   Distinct dates ......: 2
@@ -292,7 +327,7 @@ Before touching anything the CLI prints a **full report** of the consequences an
   Preview:
       2026-11-16  alice          deleted message number 0
       2026-11-15  bob            deleted message number 1
-───────────────────────────────────────────────────────────────────────────────
+──────────────────────────────────────────────────────────────────────────────
   This action will:
     • Copy 2 message(s) from "historyDeleted" back to "history".
     • Remove the restored rows from the safety backup.
@@ -321,20 +356,27 @@ forever.
 tiny-rpg-chat-archive trash <list|purge|empty> [options]
 ```
 
-| Action | Description |
-|---|---|
-| `list` | Read-only report of what the backup holds (default) |
-| `purge` | **Permanently delete** the selected rows |
+| Action  | Description                                                    |
+| ------- | -------------------------------------------------------------- |
+| `list`  | Read-only report of what the backup holds (default)            |
+| `purge` | **Permanently delete** the selected rows                       |
 | `empty` | **Permanently delete** every row (of a room, or of every room) |
 
-Selection flags are the same as `restore`: `--limit <n>`, `--dates <n>` and `--all`.
+Selection flags (required by `purge`, ignored by `list` and `empty`):
+
+| Option                | Description                                 |
+| --------------------- | ------------------------------------------- |
+| `-n, --limit <n>`     | The **n newest** messages                   |
+| `--dates <n>`         | Every message of the **n most recent days** |
+| `--older-than <days>` | Every message **older** than `n` days       |
+| `--all`               | Every message                               |
 
 ```bash
 # What is in the backup?
 tiny-rpg-chat-archive trash list -r lobby
 
-# Drop everything older than the 30 most recent days
-tiny-rpg-chat-archive trash purge -r lobby --dates 30
+# Drop everything older than 30 days
+tiny-rpg-chat-archive trash purge -r lobby --older-than 30
 
 # Wipe the backup of a single room
 tiny-rpg-chat-archive trash empty -r lobby
@@ -343,10 +385,72 @@ tiny-rpg-chat-archive trash empty -r lobby
 tiny-rpg-chat-archive trash empty
 ```
 
-`purge` asks you to type `delete` and `empty` asks you to type `DELETE EVERYTHING` (or the room id
-when `--room` is used). There is **no undo**: the rows are gone from the database.
+Each destructive action has its own confirmation word:
+
+| Command                    | Type to confirm     |
+| -------------------------- | ------------------- |
+| `trash purge`              | `delete`            |
+| `trash empty --room <id>`  | the room id         |
+| `trash empty` (every room) | `DELETE EVERYTHING` |
+
+There is **no undo**: the rows are gone from the database.
 
 ---
+
+### `reset-password`
+
+Resets the password of an account. Useful when the server owner loses access to the only admin
+account.
+
+```bash
+tiny-rpg-chat-archive reset-password [options]
+```
+
+| Option               | Description                                                               |
+| -------------------- | ------------------------------------------------------------------------- |
+| `-u, --user <id>`    | Account id (asks if omitted)                                              |
+| `--password <value>` | New password. When omitted a random one is generated and printed **once** |
+| `--dry-run`          | Validates everything without writing                                      |
+| `--json`             | Machine readable output                                                   |
+
+```bash
+# Random password (printed a single time)
+tiny-rpg-chat-archive reset-password --user admin
+
+# Known password
+tiny-rpg-chat-archive reset-password --user admin --password "hunter2hunter2hunter2"
+```
+
+The password is hashed with the same routine as the server (`sha256` of the first
+`limits.PASSWORD_SIZE` characters) and must respect `limits.MIN_PASSWORD_SIZE`.
+
+---
+
+### `migrate-usernames`
+
+Lowercases every user id **and** every row that references it.
+
+Older versions of the server accepted uppercase characters in the user id. The login still works
+(see `findUser` in `values.js`), but the database should be normalized. The server prints a warning
+on boot while there is something to migrate:
+
+```
+[APP] [WARNING] 2 user id(s) are not lowercase. Run "tiny-chat-archive migrate-usernames" to fix them.
+```
+
+```bash
+tiny-rpg-chat-archive migrate-usernames --dry-run   # show what would change
+tiny-rpg-chat-archive migrate-usernames             # asks for confirmation
+tiny-rpg-chat-archive migrate-usernames --yes       # no prompt (scripts)
+```
+
+| Option      | Description                               |
+| ----------- | ----------------------------------------- |
+| `-y, --yes` | Skip the confirmation                     |
+| `--dry-run` | Only lists the ids that would be migrated |
+| `--json`    | Machine readable output                   |
+
+> ⚠️ The migration rewrites primary keys. **Stop the server** before running it.
 
 ---
 
@@ -378,15 +482,17 @@ Select a chapter:
 printf '1\nA\n' | tiny-rpg-chat-archive export
 ```
 
+> `--json` disables the prompts completely. Every value must be passed as a flag.
+
 ---
 
 ## 🔀 Import modes
 
-| Mode | What it does | Use it when |
-|---|---|---|
-| **`merge`** | Inserts only what does not exist yet. Existing rows are ignored. | Restoring a backup without duplicates |
-| **`replace`** | **Deletes** the target chapter before inserting. | The file is the source of truth |
-| **`upsert`** | Inserts what is missing and **updates** what already exists. | You fixed the text of several messages |
+| Mode          | What it does                                                     | Use it when                            |
+| ------------- | ---------------------------------------------------------------- | -------------------------------------- |
+| **`merge`**   | Inserts only what does not exist yet. Existing rows are ignored. | Restoring a backup without duplicates  |
+| **`replace`** | **Deletes** the target chapter before inserting.                 | The file is the source of truth        |
+| **`upsert`**  | Inserts what is missing and **updates** what already exists.     | You fixed the text of several messages |
 
 > ⚠️ `replace` is destructive for the chosen chapter. Use `--dry-run` first in production.
 
@@ -394,14 +500,14 @@ printf '1\nA\n' | tiny-rpg-chat-archive export
 
 ## ⚙️ Global options
 
-| Option | Description |
-|---|---|
-| `-d, --data-dir <path>` | Folder containing `config.ini` and `database.db` |
-| `--json` | Machine-readable output, no prompts |
-| `--minimal` | Only the four core fields (`message`, `time`, `id`, `user`) |
-| `--dry-run` | Writes nothing |
-| `-h, --help` | Help |
-| `-v, --version` | Version |
+| Option                  | Description                                                 |
+| ----------------------- | ----------------------------------------------------------- |
+| `-d, --data-dir <path>` | Folder containing `config.ini` and `database.db`            |
+| `--json`                | Machine-readable output, no prompts                         |
+| `--minimal`             | Only the four core fields (`message`, `time`, `id`, `user`) |
+| `--dry-run`             | Writes nothing                                              |
+| `-h, --help`            | Help                                                        |
+| `-v, --version`         | Version                                                     |
 
 ### Where the database is looked up
 
@@ -412,7 +518,15 @@ Without `--data-dir`, the CLI tries, in order:
 3. `./tiny-chat_data`
 4. `tiny-chat_data` next to the executable
 
-The database type comes from `database.type` in `config.ini` — **SQLite** and **PostgreSQL** are supported.
+When the folder has no `config.ini`, the template at `src/server/config.ini` is used and a warning
+is printed.
+
+The database type comes from `database.type` in `config.ini`:
+
+| `database.type` | Driver    | Notes                                     |
+| --------------- | --------- | ----------------------------------------- |
+| `sqlite3`       | `sqlite3` | Uses `database.db` inside the data folder |
+| `postgre`       | `pg`      | Also accepts `postgres` / `postgresql`    |
 
 ---
 
@@ -428,7 +542,7 @@ mkdir -p backups
 
 for ROOM in $(tiny-rpg-chat-archive rooms --json | node -pe 'JSON.parse(require("fs").readFileSync(0)).map(r=>r.roomId).join("\n")'); do
   tiny-rpg-chat-archive export -r "$ROOM" -c all -f "backups/$ROOM-$DATA.json"
- done
+done
 ```
 
 ### Migrate a chapter between servers
@@ -452,6 +566,23 @@ tiny-rpg-chat-archive export -r lobby -c 2 -f chapter2.json
 
 # 3. Apply the changes
 tiny-rpg-chat-archive import -r lobby -c 2 -f chapter2.json -m upsert
+```
+
+### Recover a message deleted by a moderator
+
+```bash
+# 1. Find it in the safety backup
+tiny-rpg-chat-archive trash list -r lobby
+
+# 2. Bring it back
+tiny-rpg-chat-archive restore -r lobby --limit 1
+```
+
+### Keep the safety backup small
+
+```bash
+# Everything older than 90 days is dropped for good
+tiny-rpg-chat-archive trash purge -r lobby --older-than 90 --yes
 ```
 
 ### Use it in CI
@@ -487,6 +618,12 @@ The file has entries that do not match the format. The CLI lists the index and t
 **`No more input available (stdin closed)`**
 A question was left unanswered. Pass the options as flags (`--room`, `--chapter`) or use `--json`.
 
+**`Choose the scope with --limit <n>, --dates <n>, --older-than <days> or --all.`**
+`restore` and `trash purge` need exactly one selector. `trash list` does not need any.
+
+**`The password must have at least N characters.`**
+`reset-password` follows `limits.MIN_PASSWORD_SIZE` from `config.ini`.
+
 **Strange accents on Windows**
 Run `chcp 65001` first, or run with `NO_COLOR=1` to get output without color codes.
 
@@ -495,4 +632,5 @@ Run `chcp 65001` first, or run with `NO_COLOR=1` to get output without color cod
 ## 📚 See also
 
 - [`README.md`](../README.md) — project overview
+- [`src/server/README.md`](../src/server/README.md) — server overview and configuration
 - [`src/server/connection/sql.js`](../src/server/connection/sql.js) — database schema

@@ -1,736 +1,632 @@
-# API Documentation
+# Room Manager — Socket.IO API
 
-This document describes the WebSocket events used for managing user permissions within chat rooms.
+This document describes every Socket.IO event handled by
+[`roomManager.js`](./roomManager.js): room discovery, membership, moderation and the
+read-only permission system.
 
-Documentation written with the assistance of OpenAI's ChatGPT.
+Every handler follows the same contract:
 
-## Events
+- the payload is a plain object (`noDataInfo` rejects anything else);
+- the last argument is the **acknowledgment callback** (`fn`);
+- failures answer `{ error: true, msg: string, code: number }`;
+- the caller must be authenticated (`accountNotDetected`).
+
+## Roles
+
+`getRoomRole()` in [`values.js`](./values.js) resolves the role of an account inside a room.
+
+| Role        | How it is granted                       | Can talk       |
+| ----------- | --------------------------------------- | -------------- |
+| `owner`     | Server owner or `rooms.ownerId`         | ✅             |
+| `moderator` | Row in `moderators` or `roomModerators` | ✅             |
+| `member`    | Row in `roomPermissions`                | ✅             |
+| `guest`     | Default for every account that joins    | ❌ (read-only) |
+
+`canSpeakInRoom()` is just `role !== 'guest'`. Every write path (`send-message`,
+`edit-message`, `delete-message`, `roll-dice`, `load-messages`) checks it.
+
+---
+
+## Discovery
 
 ### `exists-room`
 
-#### Description
+Checks whether a room exists. Non-intrusive: it never joins the room.
 
-Checks whether a room with the provided `roomId` exists. Requires a valid user session and a valid `roomId`. This is a non-intrusive check that does not attempt to join or modify the room.
+```json
+{ "roomId": "lobby" }
+```
 
-#### Parameters
+**Response**
 
-- `roomId` _(string, required)_: The unique identifier of the room to be checked.
-
-#### Execution Flow
-
-1. **Data Validation:**
-   - Verifies that the `roomId` is a valid string.
-
-2. **User Authentication:**
-   - If no valid user is associated with the current socket, the function responds using `account not detect protocol` and exits.
-
-3. **Room Existence Check:**
-   - Calls room check to determine if the room exists in the current system.
-
-4. **Return Result:**
-   - Responds to the client using the provided callback `fn`, with an object:
-     - `{ exists: true }` if the room exists.
-     - `{ exists: false }` if the room does not exist.
-
-#### Response
-
-- Success:  
-  Returns a response object:
-
-  ```json
-  { "exists": true | false }
-  ```
-
-- Failure:
-  - If `roomId` is invalid: calls invalid data protocol.
-  - If the user is not authenticated: calls no account protocol.
-
-#### Example Usage
-
-```js
-socket.emit('exists-room', { roomId: 'abc123' }, (response) => {
-  if (response.exists) {
-    console.log('The room exists.');
-  } else {
-    console.log('Room not found.');
-  }
-});
+```json
+{ "exists": true }
 ```
 
 ---
 
+### `list-rooms`
+
+Lists the rooms the signed-in account is allowed to see, ordered by the last message date.
+
+```json
+{
+  "search": null,
+  "scope": "mine",
+  "openOnly": false,
+  "ownedOnly": false,
+  "page": 1,
+  "perPage": 20
+}
+```
+
+| Field       | Type             | Description                                    |
+| ----------- | ---------------- | ---------------------------------------------- |
+| `search`    | `string \| null` | Case-insensitive match on `roomId` and `title` |
+| `scope`     | `string \| null` | `mine` (default), `visited` or `all`           |
+| `openOnly`  | `boolean`        | Only rooms with `disabled = false`             |
+| `ownedOnly` | `boolean`        | Only rooms owned by the caller                 |
+| `page`      | `number`         | Page, starting at `1`                          |
+| `perPage`   | `number`         | Page size                                      |
+
+**Response**
+
+```json
+{
+  "success": true,
+  "page": 1,
+  "totalPages": 1,
+  "rooms": [
+    {
+      "roomId": "lobby",
+      "title": "Main room",
+      "ownerId": "alice",
+      "ownerNickname": "Alice",
+      "chapter": 1,
+      "users": 3,
+      "maxUsers": 50,
+      "disabled": false,
+      "readOnly": false,
+      "hasPassword": true,
+      "public": false,
+      "visitedAt": 1730419200000,
+      "isOwner": false,
+      "isModerator": false,
+      "lastMessage": 1730419200000
+    }
+  ]
+}
+```
+
+**Rules**
+
+- `scope: "all"` requires server staff, unless `server.public_rooms = true` in `config.ini`.
+- A non-staff account using `scope: "all"` only sees public rooms, the rooms it owns and the rooms
+  it already visited.
+- Rate limited by `userLoadIsRateLimited` (`MESSAGES_LOAD`).
+
+**Errors**
+
+| Code | Meaning                                         |
+| ---- | ----------------------------------------------- |
+| `2`  | `scope: "all"` without permission (`ownerOnly`) |
+
+---
+
+### `list-users`
+
+Lists accounts. **Server staff only.**
+
+```json
+{ "search": null, "all": false, "bannedOnly": false, "page": 1, "perPage": 25 }
+```
+
+| Field        | Description                                                               |
+| ------------ | ------------------------------------------------------------------------- |
+| `all`        | `true` searches the whole `users` table, `false` only the online accounts |
+| `bannedOnly` | Only accounts in the `banned` table                                       |
+| `search`     | Case-insensitive `userId` filter                                          |
+
+**Response**
+
+```json
+{
+  "success": true,
+  "page": 1,
+  "totalPages": 1,
+  "users": [
+    {
+      "userId": "alice",
+      "nickname": "Alice",
+      "online": true,
+      "rooms": ["lobby"],
+      "banned": false,
+      "banReason": null,
+      "isMod": false,
+      "isOwner": false
+    }
+  ]
+}
+```
+
+**Errors**
+
+| Code | Meaning                                  |
+| ---- | ---------------------------------------- |
+| `2`  | Caller is not server staff (`ownerOnly`) |
+
+---
+
+### `list-room-banned`
+
+Lists the accounts banned from a room. Visible to the room owner, room moderators and server staff.
+
+```json
+{ "roomId": "lobby", "page": 1, "perPage": 25 }
+```
+
+**Response**
+
+```json
+{
+  "success": true,
+  "page": 1,
+  "totalPages": 1,
+  "users": [{ "userId": "bob", "reason": null, "date": 1730419200000 }]
+}
+```
+
+**Errors**
+
+| Code | Meaning                                |
+| ---- | -------------------------------------- |
+| `1`  | Room not found                         |
+| `2`  | Caller is not room staff (`ownerOnly`) |
+
+---
+
+### `forget-room`
+
+Removes the `roomMembers` row, so the room disappears from the "visited" list of the account.
+
+```json
+{ "roomId": "lobby" }
+```
+
+**Response**
+
+```json
+{ "success": true }
+```
+
+**Errors**
+
+| Code | Meaning                                       |
+| ---- | --------------------------------------------- |
+| `2`  | The caller owns the room and cannot forget it |
+
+---
+
+## Membership
+
 ### `join`
 
-#### Description
+Joins a room.
 
-Allows a user to join a specific room. Validates room credentials, room availability, and permissions before adding them.
+```json
+{ "roomId": "lobby", "password": "" }
+```
 
-#### Parameters
+**Flow**
 
-- `roomId` _(string, required)_: The unique identifier of the room to join.
-- `password` _(string, optional)_: The room's password, if required.
+1. Validates `roomId` and `password` (both strings).
+2. Requires an authenticated account and applies `userIsRateLimited`.
+3. Loads the room. The server owner, the room owner, server moderators and room moderators skip
+   the password, the capacity and the `disabled` checks.
+4. Checks the room password (`getHashString(password)`).
+5. Checks the capacity (`maxUsers`, `+2` for room moderators).
+6. Checks `disabled`.
+7. Rejects banned accounts.
+8. Emits `room-entered` to the caller.
+9. Registers the visit in `roomMembers`.
+10. Calls `joinRoom()`, which emits `user-joined` to the room.
 
-#### Execution Flow
+**`room-entered` payload**
 
-1. **Data Validation:**
-   - The `roomId` and `password` values are checked to ensure they are valid (e.g., `roomId` should be a string, and `password` should be a string).
+```json
+{
+  "roomId": "lobby",
+  "users": {},
+  "mods": [],
+  "rpgSchema": {},
+  "roomData": {},
+  "roomPrivateData": {},
+  "role": "guest",
+  "permissions": [],
+  "data": {}
+}
+```
 
-2. **User Authentication:**
-   - The user's ID is fetched for data verification. If no user is detected, an error response is sent.
+`roomPrivateData` is only filled for the room owner and the server owner.
 
-3. **Rate Limiting:**
-   - A check is performed to determine if the user has exceeded the rate limit for joining rooms. If the user is rate-limited, the function returns early.
+**Errors**
 
-4. **Room Validation:**
-   - The function checks if the room exists by attempting to retrieve it from the `rooms`. If the room is not found, an error message with code `1` ("Room not found") is returned.
-5. **Password Validation:**
-   - If the room requires a password, it is validated against the password provided by the user (ignored by server moderators and server owner). If incorrect, an error message with code `2` ("Incorrect room password") is returned.
-
-6. **Room Capacity Check:**
-   - The function checks if the room is full by comparing the number of users in the room with the room's maximum capacity. If the room is full, an error message with code `3` ("Room is full") is returned.
-
-7. **Room Disabled Check:**
-   - If the room is disabled, and the user is not the server owner or a moderator, or the user is not the room owner, an error message with code `4` ("Room is disabled") is returned.
-
-8. **Banned Users Check:**
-   - The function checks if the user is banned from the room. If the user is banned, an error message with code `5` ("You're banned") is returned.
-
-9. **Add User to Room:**
-   - If all checks pass, the user is added to the room.
-
-10. **Send Room History and Settings:**
-    - The user is sent the following data:
-      - `room-entered`: Data received to load the room on the user page.
-
-11. **Complete Room Join:**
-    - The user is successfully joined to the room.
-
-#### Response
-
-- Success: Emits the room user list, and settings to the user.
-- Failure: Returns an error object with a code:
-  - `1`: Room not found.
-  - `2`: Incorrect room password.
-  - `3`: Room is full.
-  - `4`: Room is disabled.
-  - `5`: User is banned.
+| Code | Meaning                 |
+| ---- | ----------------------- |
+| `1`  | Room not found          |
+| `2`  | Incorrect room password |
+| `3`  | Room is full            |
+| `4`  | Room is disabled        |
+| `5`  | You're banned           |
 
 ---
 
 ### `leave`
 
-#### Description
+```json
+{ "roomId": "lobby" }
+```
 
-Allows a user to leave a room, handling necessary cleanup and validation.
+**Response**
 
-#### Parameters
+```json
+{ "success": true }
+```
 
-- `roomId` _(string, required)_: The unique identifier of the room to leave.
+**Errors**
 
-#### Process
-
-1. Validates `roomId`.
-2. Retrieves the user ID from the session.
-3. Calls `leaveRoom()` to process the exit.
-4. Returns a success or failure response.
-
-#### Response
-
-- Success: `{ success: true }`
-- Failure: Returns an error object with a code:
-  - `1`: No users in the room.
-  - `2`: User is not in the room.
-  - `3`: Invalid data.
+| Code | Meaning                |
+| ---- | ---------------------- |
+| `1`  | No users in the room   |
+| `2`  | You're not in the room |
+| `3`  | Invalid data           |
 
 ---
 
+## Moderation
+
 ### `ban-from-room`
 
-#### Description
-
-Bans a user from a specific room, preventing them from rejoining.
-
-#### Payload
+Bans an account from a room, revokes its `roomPermissions` row and disconnects it.
 
 ```json
-{
-  "userId": "string",
-  "roomId": "string"
-}
+{ "roomId": "lobby", "userId": "bob" }
 ```
 
-#### Response
+**Broadcast — `user-banned`**
 
-- **Success**:
-  ```json
-  {
-    "success": true
-  }
-  ```
-- **Error**:
-  ```json
-  {
-    "error": true,
-    "msg": "Error message",
-    "code": <error_code>
-  }
-  ```
+```json
+{ "roomId": "lobby", "userId": "bob" }
+```
 
-#### Error Codes
+**Errors**
 
-| Code | Message        |
-| ---- | -------------- |
-| 1    | Room not found |
-| 2    | Not authorized |
-| 3    | User not found |
-
-#### Behavior
-
-1. Validates the provided `userId` and `roomId`.
-2. Ensures the request is from a logged-in user.
-3. Checks if the room exists.
-4. Verifies if the requester has permission to ban users.
-5. Adds the user to the room’s ban list.
-6. Emits the `user-banned` event to notify all users in the room.
-7. Forces the banned user to leave the room.
+| Code | Meaning                                                    |
+| ---- | ---------------------------------------------------------- |
+| `1`  | Room not found                                             |
+| `2`  | Not allowed (includes trying to ban the room/server owner) |
+| `3`  | User not found                                             |
 
 ---
 
 ### `unban-from-room`
 
-#### Description
-
-Removes a user from the ban list, allowing them to rejoin the room.
-
-#### Payload
-
 ```json
-{
-  "userId": "string",
-  "roomId": "string"
-}
+{ "roomId": "lobby", "userId": "bob" }
 ```
 
-#### Response
+**Errors**
 
-- **Success**:
-  ```json
-  {
-    "success": true
-  }
-  ```
-- **Error**:
-  ```json
-  {
-    "error": true,
-    "msg": "Error message",
-    "code": <error_code>
-  }
-  ```
-
-#### Error Codes
-
-| Code | Message        |
+| Code | Meaning        |
 | ---- | -------------- |
-| 1    | Room not found |
-| 2    | Not authorized |
-| 3    | User not found |
-
-#### Behavior
-
-1. Validates the provided `userId` and `roomId`.
-2. Ensures the request is from a logged-in user.
-3. Checks if the room exists.
-4. Verifies if the requester has permission to unban users.
-5. Removes the user from the room’s ban list.
+| `1`  | Room not found |
+| `2`  | Not allowed    |
+| `3`  | User not found |
 
 ---
 
 ### `kick-from-room`
 
-#### Description
-
-Removes a user from a room without banning them, allowing them to rejoin later.
-
-#### Payload
+Accepts a single id or an array of ids. The room owner and the server owner can never be kicked.
 
 ```json
-{
-  "userId": "string",
-  "roomId": "string"
-}
+{ "roomId": "lobby", "userId": ["bob", "carol"] }
 ```
 
-#### Response
+**Response**
 
-- **Success**:
-  ```json
-  {
-    "userId": "string",
-    "success": true
-  }
-  ```
-- **Error**:
-  ```json
-  {
-    "userId": "string",
-    "error": true,
-    "msg": "Error message",
-    "code": <error_code>
-  }
-  ```
+```json
+{ "success": true, "data": [{ "userId": "bob", "success": true }] }
+```
 
-#### Error Codes
+**Broadcast — `user-kicked`**
 
-| Code | Message        |
+```json
+{ "roomId": "lobby", "userId": "bob" }
+```
+
+**Errors**
+
+| Code | Meaning        |
 | ---- | -------------- |
-| 1    | Room not found |
-| 2    | User not found |
-| 3    | Invalid data   |
-| 4    | Not authorized |
-
-#### Behavior
-
-1. Validates the provided `userId` and `roomId`.
-2. Ensures the request is from a logged-in user.
-3. Checks if the room exists.
-4. Verifies if the requester has permission to kick users.
-5. Removes the user from the room.
-6. Emits the `user-kicked` event to notify all users in the room.
+| `1`  | Room not found |
+| `2`  | User not found |
+| `3`  | Invalid data   |
+| `4`  | Not allowed    |
 
 ---
 
-## Permission Levels
-
-| Role                 | Ban Users | Unban Users | Kick Users |
-| -------------------- | --------- | ----------- | ---------- |
-| **Server Owner**     | ✅        | ✅          | ✅         |
-| **Server Moderator** | ✅        | ✅          | ✅         |
-| **Room Owner**       | ✅        | ✅          | ✅         |
-| **Room Moderator**   | ✅        | ✅          | ✅         |
-| **Regular User**     | ❌        | ❌          | ❌         |
-
----
-
-## Events Emitted
-
-| Event Name    | Description                                       |
-| ------------- | ------------------------------------------------- |
-| `user-banned` | Notifies users in a room that someone was banned. |
-| `user-kicked` | Notifies users in a room that someone was kicked. |
-
----
-
-## Notes
-
-- **Rate limiting**: Requests are subject to rate limits to prevent abuse.
-- **Authentication required**: Only logged-in users can perform these actions.
-- **Error handling**: The API returns specific error codes for better debugging.
-
-This documentation provides a structured overview of the available room moderation actions. If additional functionality is required, please update accordingly.
-
----
+## Room lifecycle
 
 ### `create-room`
 
-**Description:** Creates a new chat room.
-
-#### Payload
-
 ```json
-{
-  "roomId": "string",
-  "password": "string",
-  "title": "string"
-}
+{ "roomId": "lobby", "password": "", "title": "Main room" }
 ```
 
-#### Response
+**Errors**
 
-- **Success:**
-  ```json
-  { "success": true }
-  ```
-- **Error:** Room already exists
-  ```json
-  { "error": true, "msg": "This room already exists.", "code": 1 }
-  ```
-
-#### Conditions:
-
-- Only logged-in users can create rooms.
-- Room ID, password, and title must be strings.
-- A rate limit check is performed.
+| Code | Meaning                                                    |
+| ---- | ---------------------------------------------------------- |
+| `1`  | This room already exists                                   |
+| `2`  | The room id does not have the minimum number of characters |
 
 ---
 
 ### `delete-room`
 
-**Description:** Deletes an existing room.
-
-#### Payload
+Deletes the room and disconnects everyone. Requires the account password.
 
 ```json
-{
-  "roomId": "string"
-}
+{ "roomId": "lobby", "password": "my-password" }
 ```
 
-#### Response
+**Errors**
 
-- **Success:**
-  ```json
-  { "success": true }
-  ```
-- **Error:**
-  - Room not found:
-    ```json
-    { "error": true, "msg": "Room not found.", "code": 1 }
-    ```
-  - Insufficient permissions:
-    ```json
-    { "error": true, "msg": "You are not allowed to do this.", "code": 2 }
-    ```
-  - Insufficient permissions:
-    ```json
-    { "error": true, "msg": "Your password is incorrect.", "code": 3 }
-    ```
-
-#### Conditions:
-
-- Only logged-in users can delete rooms.
-- Only the **server owner**, **server moderators**, or the **room owner** can delete a room.
-- All users in the room will be disconnected upon deletion.
-- Related room data (history, private data, etc.) is removed.
+| Code | Meaning                        |
+| ---- | ------------------------------ |
+| `1`  | Room not found                 |
+| `2`  | You are not allowed to do this |
+| `3`  | Your password is incorrect     |
 
 ---
 
-### `disable-room`
+### `disable-room` / `enable-room`
 
-**Description:** Disables a room, preventing new activity.
-
-#### Payload
+Toggles `rooms.disabled`. Disabling disconnects everyone but the room owner and the server owner.
 
 ```json
-{
-  "roomId": "string"
-}
+{ "roomId": "lobby" }
 ```
 
-#### Response
+**Errors**
 
-- **Success:**
-  ```json
-  { "success": true }
-  ```
-- **Error:**
-  - Room not found:
-    ```json
-    { "error": true, "msg": "Room not found.", "code": 1 }
-    ```
-  - Insufficient permissions:
-    ```json
-    { "error": true, "msg": "You are not allowed to do this.", "code": 2 }
-    ```
-
-#### Conditions:
-
-- Only logged-in users can disable rooms.
-- Only the **server owner**, **server moderators**, or the **room owner** can disable a room.
-- All users in the room will be disconnected.
+| Code | Meaning                        |
+| ---- | ------------------------------ |
+| `1`  | Room not found                 |
+| `2`  | You are not allowed to do this |
 
 ---
 
-### `enable-room`
+### `enable-readonly-room` / `disable-readonly-room`
 
-**Description:** Re-enables a previously disabled room.
-
-#### Payload
+Toggles `rooms.readOnly`. When the room is read-only, only the owner, the staff and the room
++moderators can write. Both emit `room-updated`.
 
 ```json
-{
-  "roomId": "string"
-}
+{ "roomId": "lobby" }
 ```
 
-#### Response
+**Errors**
 
-- **Success:**
-  ```json
-  { "success": true }
-  ```
-- **Error:**
-  - Room not found:
-    ```json
-    { "error": true, "msg": "Room not found.", "code": 1 }
-    ```
-  - Insufficient permissions:
-    ```json
-    { "error": true, "msg": "You are not allowed to do this.", "code": 2 }
-    ```
-
-#### Conditions:
-
-- Only logged-in users can enable rooms.
-- Only the **server owner**, **server moderators**, or the **room owner** can enable a room.
+| Code | Meaning                        |
+| ---- | ------------------------------ |
+| `1`  | Room not found                 |
+| `2`  | You are not allowed to do this |
 
 ---
 
-## Notes
+### `room-add-mod` / `room-remove-mod`
 
-- All actions require a valid user session.
-- The system enforces rate limiting to prevent abuse.
-- If a room is **disabled**, users are automatically disconnected.
-- **Deleting a room** permanently removes all related data.
-
-## Events
-
-### `room-add-mod`
-
-**Description:**
-Adds moderators to a room. Only the room owner or the server owner can perform this action.
-
-**Payload:**
+Adds or removes room moderators. Only the room owner or the server owner can call it.
 
 ```json
-{
-  "roomId": "<room_id>",
-  "mods": ["<user_id>", "<user_id>"]
-}
+{ "roomId": "lobby", "mods": ["bob", "carol"] }
 ```
 
-**Response:**
+**Broadcast — `room-mod-updated`**
 
 ```json
-{
-  "success": true
-}
+{ "roomId": "lobby", "type": "add", "result": ["bob"] }
 ```
 
-**Error Responses:**
+**Errors**
 
-- `{ "error": true, "msg": "Room not found.", "code": 1 }` - If the specified room does not exist.
-- `sendIncompleteDataInfo(fn)` - If `roomId` is not a string or `mods` is not an array.
-- `accountNotDetected(fn)` - If the user is not logged in.
-- `ownerOnly(fn, 2)` - If the user is neither the room owner nor the server owner.
-
-**Behavior:**
-
-1. Validates input data (`roomId` must be a string, `mods` must be an array).
-2. Retrieves the user ID from the session.
-3. Checks if the user is logged in and not rate-limited.
-4. Retrieves the room data.
-5. Verifies if the user is the room owner or the server owner.
-6. Adds new moderators from `mods` if they are not already moderators and exist in the room users list.
-7. Updates the room data and notifies all users in the room via `room-mod-updated` event.
-8. Returns a success response.
+| Code | Meaning                                                        |
+| ---- | -------------------------------------------------------------- |
+| `1`  | Room not found                                                 |
+| `2`  | Only the owner is allowed to perform this action (`ownerOnly`) |
 
 ---
 
-### `room-remove-mod`
+## Permissions (read-only guests)
 
-**Description:**
-Removes moderators from a room. Only the room owner or the server owner can perform this action.
+Every account that joins a room starts as a **guest** (`role: "guest"`), which means read-only
+mode. The room owner must explicitly grant the permission to talk.
 
-**Payload:**
+### `room-grant-permission`
+
+```json
+{ "roomId": "lobby", "userIds": ["bob"] }
+```
+
+**Broadcast — `room-permission-updated`**
 
 ```json
 {
-  "roomId": "<room_id>",
-  "mods": ["<user_id>", "<user_id>"]
+  "roomId": "lobby",
+  "type": "grant",
+  "users": ["bob"],
+  "permissions": [{ "userId": "bob", "grantedBy": "alice", "date": 1730419200000 }]
 }
 ```
 
-**Response:**
+**Errors**
 
-```json
-{
-  "success": true
-}
-```
-
-**Error Responses:**
-
-- `{ "error": true, "msg": "Room not found.", "code": 1 }` - If the specified room does not exist.
-- `sendIncompleteDataInfo(fn)` - If `roomId` is not a string or `mods` is not an array.
-- `accountNotDetected(fn)` - If the user is not logged in.
-- `ownerOnly(fn, 2)` - If the user is neither the room owner nor the server owner.
-
-**Behavior:**
-
-1. Validates input data (`roomId` must be a string, `mods` must be an array).
-2. Retrieves the user ID from the session.
-3. Checks if the user is logged in and not rate-limited.
-4. Retrieves the room data.
-5. Verifies if the user is the room owner or the server owner.
-6. Removes moderators listed in `mods` from the room's moderator list.
-7. Updates the room data and notifies all users in the room via `room-mod-updated` event.
-8. Returns a success response.
+| Code | Meaning                                          |
+| ---- | ------------------------------------------------ |
+| `1`  | Room not found                                   |
+| `2`  | Only the owner is allowed to perform this action |
 
 ---
 
-### `update-room`
+### `room-revoke-permission`
 
-#### Description
+Same payload as `room-grant-permission`. Emits `room-permission-updated` with `type: "revoke"`.
 
-Updates the settings of a specific room. Only the room owner or the server owner can perform this action.
+---
 
-#### Payload
+### `room-permissions`
+
+Returns the caller role plus the list of accounts allowed to talk.
+
+```json
+{ "roomId": "lobby" }
+```
+
+**Response**
 
 ```json
 {
-  "roomId": "string",
-  "newSettings": {
-    "title": "string",
-    "password": "string",
-    "maxUsers": "number"
+  "success": true,
+  "role": "guest",
+  "permissions": [],
+  "roles": {
+    "OWNER": "owner",
+    "MODERATOR": "moderator",
+    "MEMBER": "member",
+    "GUEST": "guest"
   }
 }
 ```
 
-#### Response
+---
 
-- **Success:**
-  ```json
-  { "success": true }
-  ```
-- **Error:**
-  ```json
-  { "error": true, "msg": "Error message", "code": number }
-  ```
+## Room settings
 
-#### Validation & Rules
+### `update-room`
 
-- The user must be **logged in**.
-- The user must be the **room owner** or **server owner**.
-- The room must exist.
-- Allowed updates:
-  - **`prompt`**: Limited to `ROOM_PROMPT` characters.
-  - **`firstDialogue`**: Limited to `MESSAGE_SIZE` characters.
-  - **`systemInstruction`**: Limited to `ROOM_SYSTEM_INSTRUCTION` characters.
-  - **`firstDialogue`**: Limited to `ROOM_FIRST_DIALOGUE` characters.
-  - **`title`**: Limited to `ROOM_TITLE_SIZE` characters.
-  - **`model`**: Limited to `MODEL_ID_SIZE` characters.
-  - **`maxOutputTokens`**: Is a REAL value in SQL.
-  - **`temperature`**: Is a REAL value in SQL.
-  - **`topP`**: Is a REAL value in SQL.
-  - **`topK`**: Is a REAL value in SQL.
-  - **`presencePenalty`**: Is a REAL value in SQL.
-  - **`frequencyPenalty`**: Is a REAL value in SQL.
-  - **`password`**: Limited to `PASSWORD_SIZE_LIMIT` characters.
-  - **`maxUsers`**: Must be a finite number between `1` and `MAX_USERS_PER_ROOM`.
-- If updates are applied, all users in the room will receive an `room-updated` event.
+Only the room owner or the server owner can call it. Every field is optional and validated
+individually — an invalid value is silently ignored instead of failing the whole request.
 
-#### Example Usage
-
-```javascript
-socket.emit(
-  'update-room',
-  { roomId: '123', newSettings: { title: 'New Room Title' } },
-  (response) => {
-    console.log(response);
-  },
-);
+```json
+{
+  "roomId": "lobby",
+  "newSettings": {
+    "title": "New title",
+    "password": "new-password",
+    "prompt": "...",
+    "systemInstruction": "...",
+    "firstDialogue": "...",
+    "model": "gpt-4o-mini",
+    "maxOutputTokens": 512,
+    "temperature": 0.8,
+    "topP": 0.9,
+    "topK": 40,
+    "presencePenalty": 0,
+    "frequencyPenalty": 0,
+    "maxUsers": 50,
+    "chapter": 2,
+    "public": true
+  }
+}
 ```
+
+| Field                                                                                   | Limit                                                |
+| --------------------------------------------------------------------------------------- | ---------------------------------------------------- |
+| `title`                                                                                 | `limits.ROOM_TITLE_SIZE`                             |
+| `password`                                                                              | `limits.PASSWORD_SIZE` (hashed with `getHashString`) |
+| `prompt`                                                                                | `limits.ROOM_PROMPT`                                 |
+| `systemInstruction`                                                                     | `limits.ROOM_SYSTEM_INSTRUCTION`                     |
+| `firstDialogue`                                                                         | `limits.ROOM_FIRST_DIALOGUE`                         |
+| `model`                                                                                 | `limits.MODEL_ID_SIZE`                               |
+| `maxOutputTokens`, `temperature`, `topP`, `topK`, `presencePenalty`, `frequencyPenalty` | Finite `REAL` with at most 7 significant digits      |
+| `maxUsers`                                                                              | Clamped between `1` and `limits.MAX_USERS_PER_ROOM`  |
+| `chapter`                                                                               | Integer `>= 1`                                       |
+| `public`                                                                                | `boolean`                                            |
+
+**Broadcast — `room-updated`**
+
+```json
+{ "roomId": "lobby", "data": {} }
+```
+
+**Errors**
+
+| Code | Meaning                                          |
+| ---- | ------------------------------------------------ |
+| `1`  | Room not found                                   |
+| `2`  | Only the owner is allowed to perform this action |
 
 ---
 
 ### `update-room-data`
 
-#### Description
-
-Updates additional room data, either public or private, depending on the request.
-
-#### Payload
+Stores free-form JSON in `roomData` (public) or `privateRoomData` (owner only).
 
 ```json
-{
-  "roomId": "string",
-  "isPrivate": "boolean",
-  "values": { "key": "value" }
-}
+{ "roomId": "lobby", "isPrivate": false, "values": { "topic": "Gaming" } }
 ```
 
-#### Response
+**Broadcast — `room-data-updated`** (public data only)
 
-- **Success:**
-  ```json
-  { "success": true }
-  ```
-- **Error:**
-  ```json
-  { "error": true, "msg": "Error message", "code": number }
-  ```
-
-#### Validation & Rules
-
-- The user must be **logged in**.
-- The user must be the **room owner** or **server owner**.
-- The room must exist.
-- If `isPrivate` is `true`, updates are stored in `privateRoomData`, and only the sender receives an update.
-- If `isPrivate` is `false`, updates are stored in `roomData`, and all users in the room receive an update.
-
-#### Example Usage
-
-```javascript
-socket.emit(
-  'update-room-data',
-  { roomId: '123', isPrivate: false, values: { topic: 'Gaming' } },
-  (response) => {
-    console.log(response);
-  },
-);
+```json
+{ "roomId": "lobby", "isPrivate": false, "values": { "topic": "Gaming" } }
 ```
+
+**Errors**
+
+| Code | Meaning                                             |
+| ---- | --------------------------------------------------- |
+| `1`  | Room not found                                      |
+| `2`  | You do not have permission to update this room data |
 
 ---
 
-## Room permissions (read-only guests)
+### `update-rpg-schema`
 
-Every user that joins a room starts as a **guest** (`role: "guest"`), which means
-read-only mode. The room owner must explicitly grant the permission to talk.
-
-### Roles
-
-| Role        | Can talk | How it is granted                                     |
-| ----------- | -------- | ----------------------------------------------------- |
-| `owner`     | ✅       | Room owner or server owner.                           |
-| `moderator` | ✅       | Server moderator or room moderator.                   |
-| `member`    | ✅       | Explicitly granted with `room-grant-permission`.      |
-| `guest`     | ❌       | Default for every user that joins the room.           |
-
-### `room-grant-permission`
-
-Grants the permission to send messages. Only the room owner or the server owner
-can call it.
+Stores the RPG sheet schema of the room.
 
 ```json
-{ "roomId": "lobby", "userIds": ["bob"] }
+{ "roomId": "lobby", "values": { "fields": [] } }
 ```
 
-### `room-revoke-permission`
-
-Revokes the permission to send messages. Only the room owner or the server owner
-can call it.
+**Broadcast — `rpg-schema-updated`**
 
 ```json
-{ "roomId": "lobby", "userIds": ["bob"] }
+{ "roomId": "lobby", "values": { "fields": [] } }
 ```
 
-### `room-permissions`
+**Errors**
 
-Returns the caller role plus the list of users allowed to talk in the room.
+| Code | Meaning                                               |
+| ---- | ----------------------------------------------------- |
+| `1`  | Room not found                                        |
+| `2`  | You do not have permission to update this room schema |
 
-```json
-{ "success": true, "role": "guest", "permissions": [], "roles": { "GUEST": "guest" } }
-```
+---
 
-### Events emitted
+## Events emitted
 
-| Event                      | Description                                                      |
-| -------------------------- | ---------------------------------------------------------------- |
-| `room-permission-updated`  | Sent to the room when someone is granted or revoked.             |
-
-### `room-entered` payload
-
-The payload includes the caller `role` and the current `permissions` list, so
-the client can render a read-only warning instead of the message box.
+| Event                     | Description                                        |
+| ------------------------- | -------------------------------------------------- |
+| `room-entered`            | Sent to the caller after a successful `join`       |
+| `room-updated`            | Room settings changed                              |
+| `room-data-updated`       | Public room data changed                           |
+| `rpg-schema-updated`      | RPG schema changed                                 |
+| `room-mod-updated`        | Room moderator list changed                        |
+| `room-permission-updated` | Someone was granted/revoked the permission to talk |
+| `user-joined`             | An account joined the room                         |
+| `user-left`               | An account left the room                           |
+| `user-banned`             | An account was banned from the room                |
+| `user-kicked`             | An account was kicked from the room                |
