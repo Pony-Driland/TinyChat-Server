@@ -47,11 +47,30 @@ const parsePurgeWindow = (mode, amount) => {
 };
 
 /**
+ * Reads the timestamp of a row.
+ *
+ * The driver may hand the column back as a number or as a numeric string,
+ * depending on the database and on the column metadata, so both are accepted.
+ *
+ * @param {{ date?: unknown }} row - Row to read.
+ * @returns {number|null}
+ */
+const getRowDate = (row) => {
+  const value = row?.date;
+  if (typeof value === 'number') return Number.isFinite(value) ? value : null;
+  if (typeof value === 'string' && value.trim() !== '') {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  return null;
+};
+
+/**
  * Picks the rows that must be deleted.
  *
- * @param {Array<{ date?: number }>} rows - Rows ordered from newest to oldest.
+ * @param {Array<{ date?: unknown }>} rows - Rows ordered from newest to oldest.
  * @param {{ mode: string, cutoff: number|null, keep: number|null }} window - Resolved window.
- * @returns {Array<{ date?: number }>}
+ * @returns {Array<{ date?: unknown }>}
  */
 const pickPurgeTargets = (rows, window) => {
   if (window.mode === 'all') return rows;
@@ -65,7 +84,14 @@ const pickPurgeTargets = (rows, window) => {
   }
 
   if (window.cutoff === null) return [];
-  return rows.filter((row) => typeof row.date === 'number' && row.date < window.cutoff);
+
+  // `hours` and `days` delete everything inside the window, so "6 hours ago"
+  // removes the last 6 hours. The comparison must be `>=`: using `<` targets
+  // the opposite range and silently deletes nothing on an active room.
+  return rows.filter((row) => {
+    const date = getRowDate(row);
+    return date !== null && date >= window.cutoff;
+  });
 };
 
 /**
