@@ -1,5 +1,6 @@
 import { countObj, isJsonObject } from 'tiny-essentials/basics/objChecker';
 import db from './sql';
+import { createStreamBroadcast } from './stream';
 import {
   userMsgIsRateLimited,
   userSession,
@@ -181,6 +182,9 @@ const purgeRows = async ({ table, trashTable, column, roomId, rows }) => {
  * @param {import('../proxyOnConnection.mjs').EmitTo} emitTo
  */
 export default function messageManager(socket, socketTo, emitTo) {
+  // Large payloads are split so the browser never has to parse a huge packet.
+  const streamTo = createStreamBroadcast(emitTo);
+  const streamSocketTo = createStreamBroadcast(socketTo);
   socket.on('send-message', async (data, fn) => {
     if (noDataInfo(data, fn)) return;
     const { message, roomId, tokens, model, hash, isModel, errorCode } = data;
@@ -265,7 +269,7 @@ export default function messageManager(socket, socketTo, emitTo) {
     const msg = await roomHistories.set(roomId, msgData);
 
     // Emit to the room that the user joined (based on roomId)
-    socketTo(roomId, 'new-message', {
+    streamSocketTo(roomId, 'new-message', {
       roomId,
       id: msg.historyId,
       userId,
@@ -378,7 +382,7 @@ export default function messageManager(socket, socketTo, emitTo) {
     };
 
     // Emit the event only to logged-in users in the room
-    socketTo(roomId, 'message-updated', newEvent);
+    streamSocketTo(roomId, 'message-updated', newEvent);
 
     // Complete
     fn(newEvent);
