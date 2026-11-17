@@ -6037,15 +6037,10 @@ timed-out@^4.0.1:
   resolved "https://registry.yarnpkg.com/timed-out/-/timed-out-4.0.1.tgz#f32eacac5a175bea25d7fab565ab3ed8741ef56f"
   integrity sha512-G7r3AhovYtr5YKOWQkta8RKAPb+J9IsO4uVmzjl8AZwfhs8UcUwTiD6gcJYSgOtzyjvQKrKYn41syHbUWMkafA==
 
-tiny-essentials@^1.24.3:
-  version "1.24.5"
-  resolved "https://registry.yarnpkg.com/tiny-essentials/-/tiny-essentials-1.24.5.tgz#76132adf833a73655dc49eaded4b68bc4f15cffb"
-  integrity sha512-exikhxkAoKv226kXf9ILToBuWnYajZR/QBCoxqreS/m5xjQbE0DpdyB9OSC/sy5FQrmEcuka/J309Y/sn2SRZg==
-
-tiny-essentials@^1.29.3:
-  version "1.29.3"
-  resolved "https://registry.yarnpkg.com/tiny-essentials/-/tiny-essentials-1.29.3.tgz#78116382f3e4345a6b98e29ea1157ab4f878bec5"
-  integrity sha512-uFOxKq7BYQj1Vu0u+x5ux+A88yTx3Ffl7vkUSJT/ruw9eJEgH1KV/CPv2fEy6NXXzHtyRwP0NgOyswmNcUHPcA==
+tiny-essentials@^1.24.3, tiny-essentials@^1.29.5:
+  version "1.29.5"
+  resolved "https://registry.yarnpkg.com/tiny-essentials/-/tiny-essentials-1.29.5.tgz#97d5e9b9a09950e3064f8c56960ce0311cea1ee9"
+  integrity sha512-W2EvzGW9Ey3RoJzvqYK5Ym+w30aepNf1rVNzg9BWSGtTo2HRkRTmh0zDg5dvCR9n644RQtIqT7TqHJtE3Lh3ig==
 
 tiny-server-essentials@^1.1.0:
   version "1.1.0"
