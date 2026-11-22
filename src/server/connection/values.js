@@ -81,6 +81,26 @@ export const createAccount = async (userId, password, nickname) => {
   });
 };
 
+/**
+ * Normalizes a room language code.
+ *
+ * The language is stored as a lowercase ISO 639-1 code (`en`, `pt`, `ja`, ...).
+ * An empty string, `null` or an invalid value means "no language", which makes
+ * the room visible on every language filter.
+ *
+ * @param {unknown} language - Raw language value.
+ * @returns {string|null} The normalized code, or `null` when there is none.
+ */
+export const normalizeRoomLanguage = (language) => {
+  if (typeof language !== 'string') return null;
+
+  const normalized = language.trim().toLowerCase();
+  if (normalized.length < 2 || normalized.length > 8) return null;
+  if (!/^[a-z]{2,3}(-[a-z0-9]{2,4})?$/.test(normalized)) return null;
+
+  return normalized;
+};
+
 export const createRoom = async (userId, roomId, password, title) => {
   const hashedPassword = getHashString(password.substring(0, getIniConfig('PASSWORD_SIZE')));
   const rooms = db.getTable('rooms');

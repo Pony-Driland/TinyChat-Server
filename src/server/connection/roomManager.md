@@ -55,19 +55,21 @@ Lists the rooms the signed-in account is allowed to see, ordered by the last mes
   "scope": "mine",
   "openOnly": false,
   "ownedOnly": false,
+  "language": null,
   "page": 1,
   "perPage": 20
 }
 ```
 
-| Field       | Type             | Description                                    |
-| ----------- | ---------------- | ---------------------------------------------- |
-| `search`    | `string \| null` | Case-insensitive match on `roomId` and `title` |
-| `scope`     | `string \| null` | `mine` (default), `visited` or `all`           |
-| `openOnly`  | `boolean`        | Only rooms with `disabled = false`             |
-| `ownedOnly` | `boolean`        | Only rooms owned by the caller                 |
-| `page`      | `number`         | Page, starting at `1`                          |
-| `perPage`   | `number`         | Page size                                      |
+| Field       | Type             | Description                                          |
+| ----------- | ---------------- | ---------------------------------------------------- |
+| `search`    | `string \| null` | Case-insensitive match on `roomId` and `title`       |
+| `scope`     | `string \| null` | `mine` (default), `visited` or `all`                 |
+| `openOnly`  | `boolean`        | Only rooms with `disabled = false`                   |
+| `ownedOnly` | `boolean`        | Only rooms owned by the caller                       |
+| `language`  | `string \| null` | ISO 639-1 code. `null` lists every language          |
+| `page`      | `number`         | Page, starting at `1`                                |
+| `perPage`   | `number`         | Page size                                            |
 
 **Response**
 
@@ -89,6 +91,7 @@ Lists the rooms the signed-in account is allowed to see, ordered by the last mes
       "readOnly": false,
       "hasPassword": true,
       "public": false,
+      "language": "en",
       "visitedAt": 1730419200000,
       "isOwner": false,
       "isModerator": false,
@@ -101,6 +104,8 @@ Lists the rooms the signed-in account is allowed to see, ordered by the last mes
 **Rules**
 
 - `scope: "all"` requires server staff, unless `server.public_rooms = true` in `config.ini`.
+- `language` is optional. When it is omitted (or `null`) the rooms of every language are listed.
+  Rooms without a language are only returned by the unfiltered list.
 - A non-staff account using `scope: "all"` only sees public rooms, the rooms it owns and the rooms
   it already visited.
 - Rate limited by `userLoadIsRateLimited` (`MESSAGES_LOAD`).

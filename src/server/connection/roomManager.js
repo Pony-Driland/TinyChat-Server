@@ -22,6 +22,7 @@ import {
   grantRoomPermission,
   revokeRoomPermission,
   listRoomPermissions,
+  normalizeRoomLanguage,
   ROOM_ROLES,
 } from './values';
 
@@ -61,7 +62,7 @@ export default function roomManager(socket, emitTo, socketTo, socketEmit) {
    */
   socket.on('list-rooms', async (data, fn) => {
     if (noDataInfo(data, fn)) return;
-    const { search, scope, openOnly, ownedOnly, page, perPage } = data;
+    const { search, scope, openOnly, ownedOnly, language, page, perPage } = data;
 
     // Validate values
     if (
@@ -69,6 +70,7 @@ export default function roomManager(socket, emitTo, socketTo, socketEmit) {
       (typeof scope !== 'string' && scope !== null) ||
       typeof openOnly !== 'boolean' ||
       typeof ownedOnly !== 'boolean' ||
+      (typeof language !== 'string' && language !== null) ||
       typeof page !== 'number' ||
       page < 1 ||
       typeof perPage !== 'number' ||
@@ -135,6 +137,10 @@ export default function roomManager(socket, emitTo, socketTo, socketEmit) {
     // Only the rooms that are open for access.
     if (openOnly) conditions.push({ column: 'disabled', value: false });
 
+    // Optional language filter. Without it the rooms of every language are listed.
+    const languageFilter = normalizeRoomLanguage(language);
+    if (languageFilter) conditions.push({ column: 'language', value: languageFilter });
+
     // Search
     if (needle.length > 0) {
       conditions.push({
@@ -159,6 +165,7 @@ export default function roomManager(socket, emitTo, socketTo, socketEmit) {
         'readOnly',
         'password',
         'public',
+        'language',
       ],
       perPage,
       page,
@@ -180,6 +187,7 @@ export default function roomManager(socket, emitTo, socketTo, socketEmit) {
         readOnly: Boolean(item.readOnly),
         hasPassword: typeof item.password === 'string' && item.password.length > 0,
         public: Boolean(item.public),
+        language: typeof item.language === 'string' ? item.language : null,
         visitedAt: visitedAt.get(item.roomId) ?? null,
         isOwner: item.ownerId === userId,
         isModerator: false,
@@ -1328,6 +1336,16 @@ export default function roomManager(socket, emitTo, socketTo, socketEmit) {
 
     if ('public' in newSettings) {
       if (typeof newSettings.public === 'boolean') allowedUpdates.public = newSettings.public;
+    }
+
+    if ('language' in newSettings) {
+      // An empty value (or `null`) clears the language, so the room is not
+      // restricted by the language filter anymore.
+      const language = normalizeRoomLanguage(newSettings.language);
+      if (language === null && newSettings.language !== null && newSettings.language !== '')
+        return sendIncompleteDataInfo(fn);
+
+      allowedUpdates.language = language;
     }
 
     // Apply updates if there are valid changes

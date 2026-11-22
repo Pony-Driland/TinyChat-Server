@@ -55,6 +55,7 @@ export const startDatabase = async (appStorage) => {
       ['readOnly', 'BOOLEAN', 'DEFAULT 0'],
       ['chapter', 'INTEGER', 'NOT NULL DEFAULT 1'],
       ['public', 'BOOLEAN', 'DEFAULT 0'],
+      ['language', 'TEXT'],
     ]);
 
     // Stores room tokens data
@@ -267,7 +268,17 @@ export const startDatabase = async (appStorage) => {
       );
     });
 
-    await db.startMigration(1);
+    db.migrator.addMigration(2, async (database) => {
+      // `language` is the ISO 639-1 code of the language spoken in the room.
+      // `NULL` keeps the room visible on every language filter.
+      await database.run(
+        'ALTER TABLE rooms ADD COLUMN language TEXT',
+        undefined,
+        'migration.rooms.language',
+      );
+    });
+
+    await db.startMigration(2);
 
     // Complete
     console.log(`[APP] [${config.database.type}] Database connection opened.`);
