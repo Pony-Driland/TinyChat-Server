@@ -9,8 +9,8 @@
         "tiny-rpg-chat-archive": "./build/tiny-chat-archive-cli.js"
     },
     "scripts": {
-        "start": "npx babel-node src/server/index.js",
-        "start:proxy": "npx babel-node src/proxy/index.js",
+        "dev": "npx babel-node src/server/index.js",
+        "dev:proxy": "npx babel-node src/proxy/index.js",
         "build": "node build/pkg/tiny-chat.js",
         "test": "node --test test/tiny-chat-archive-cli.test.mjs",
         "test:watch": "node --test --watch test/tiny-chat-archive-cli.test.mjs",
