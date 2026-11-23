@@ -245,6 +245,58 @@ export const startDatabase = async (appStorage) => {
       ['FOREIGN KEY (roomId) REFERENCES rooms(roomId) ON DELETE CASCADE'],
     ]);
 
+    // Stores the playlists created by a room owner.
+    //
+    // A playlist is either available on every room the owner has (`scope`
+    // `all`) or only on the rooms listed in `roomPlaylistRooms` (`scope`
+    // `rooms`). The tracks are stored as JSON so the client is free to evolve
+    // the track format without a schema change.
+    console.log(`[APP] [${config.database.type}] [table] Loading room playlists...`);
+    await db.initTable({ name: 'roomPlaylists', id: 'playlistId' }, [
+      ['playlistId', 'TEXT', 'PRIMARY KEY'],
+      ['ownerId', 'TEXT', 'NOT NULL'],
+      ['name', 'TEXT'],
+      ['tracks', 'JSON', 'NOT NULL'],
+      ['scope', 'TEXT', 'NOT NULL DEFAULT \'all\''],
+      ['date', 'INTEGER', 'NOT NULL'],
+      ['updatedAt', 'INTEGER', 'NOT NULL'],
+    ]);
+
+    // Binds a `scope = 'rooms'` playlist to the rooms it can be used on.
+    console.log(`[APP] [${config.database.type}] [table] Loading room playlist rooms...`);
+    await db.initTable({ name: 'roomPlaylistRooms', id: 'playlistId', subId: 'roomId' }, [
+      ['playlistId', 'TEXT', 'NOT NULL'],
+      ['roomId', 'TEXT', 'NOT NULL'],
+      ['PRIMARY KEY (playlistId, roomId)'],
+      ['FOREIGN KEY (playlistId) REFERENCES roomPlaylists(playlistId) ON DELETE CASCADE'],
+    ]);
+
+    // Stores the music player of a room.
+    //
+    // Only the last interaction is stored: the clients rebuild the current
+    // position from `position` + (`updatedAt` - now) while `playing` is set.
+    // This keeps the sync to a single row per room instead of a stream of
+    // updates.
+    console.log(`[APP] [${config.database.type}] [table] Loading room player...`);
+    await db.initTable({ name: 'roomPlayer', id: 'roomId' }, [
+      ['roomId', 'TEXT', 'PRIMARY KEY'],
+      ['playlistId', 'TEXT'],
+      ['trackIndex', 'INTEGER', 'DEFAULT 0'],
+      ['position', 'REAL', 'DEFAULT 0'],
+      // Duration of the current track, in seconds. A visitor that joins after
+      // the playlist is over uses it to tell "the song is still playing" from
+      // "the playlist already ended while I was away".
+      ['duration', 'REAL', 'DEFAULT 0'],
+      ['playing', 'BOOLEAN', 'DEFAULT 0'],
+      // Repeats the playlist from the first track instead of stopping.
+      ['loopMode', 'BOOLEAN', 'DEFAULT 0'],
+      ['volume', 'REAL', 'DEFAULT 1'],
+      ['revision', 'INTEGER', 'DEFAULT 0'],
+      ['updatedAt', 'INTEGER', 'DEFAULT 0'],
+      ['updatedBy', 'TEXT'],
+      ['FOREIGN KEY (roomId) REFERENCES rooms(roomId) ON DELETE CASCADE'],
+    ]);
+
     // Stores audit data
     console.log(`[APP] [${config.database.type}] [table] Loading audit...`);
     await db.initTable({ name: 'audit', id: 'auditId' }, [

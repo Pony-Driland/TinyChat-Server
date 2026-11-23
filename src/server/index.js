@@ -7,6 +7,7 @@ import startFiles from './appStorage';
 import messageManager from './connection/messageManager';
 import userManager from './connection/userManager';
 import roomManager from './connection/roomManager';
+import playerManager from './connection/playerManager';
 import { getHashString, getIniConfig } from './connection/values';
 import db from './connection/sql';
 import { VERSION, getServerHelp } from '../api/help';
@@ -79,6 +80,7 @@ startFiles().then(async (appStorage) => {
     messageManager(socket, socketTo, emitTo);
     userManager(socket, emitTo);
     roomManager(socket, emitTo, socketTo, socketEmit);
+    playerManager(socket, emitTo, socketTo);
   });
 
   io.listen(appStorage.config.server.port);
