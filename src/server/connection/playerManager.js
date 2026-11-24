@@ -263,8 +263,14 @@ const loadPlaylistsRooms = async (playlistIds) => {
  * @param {string|null} filter - `global`, `room` or `null`.
  * @returns {Record<string, any>}
  */
-const playlistCriteria = (ownerId, roomId, filter) => {
+const playlistCriteria = (ownerId, roomId, filter, search = '') => {
   const conditions = [{ column: 't.ownerId', value: ownerId }];
+
+  // The name is matched with `LIKE`, so the term is escaped and wrapped here.
+  if (typeof search === 'string' && search.trim().length > 0) {
+    const term = search.trim().slice(0, MAX_PLAYLIST_NAME).replace(/[%_\\]/g, '\\$&');
+    conditions.push({ column: 't.name', operator: 'LIKE', value: `%${term}%` });
+  }
 
   if (filter === 'global') {
     conditions.push({ column: 't.scope', value: 'all' });
@@ -291,11 +297,11 @@ const playlistCriteria = (ownerId, roomId, filter) => {
  * @returns {Promise<Record<string, any>[]>}
  */
 const listOwnerPlaylists = async (ownerId, options = {}) => {
-  const { roomId = '', filter = null, limit = null } = options;
+  const { roomId = '', filter = null, limit = null, search = '' } = options;
   const table = db.getTable('roomPlaylists');
 
   const rows = await table.search({
-    q: playlistCriteria(ownerId, roomId, filter),
+    q: playlistCriteria(ownerId, roomId, filter, search),
     select: 't.*',
     // The join is only needed to resolve the rooms of a `scope = 'rooms'`
     // playlist, and it is a primary key lookup, so it never duplicates a row.
@@ -326,10 +332,10 @@ const listOwnerPlaylists = async (ownerId, options = {}) => {
  * @returns {Promise<number>}
  */
 const countOwnerPlaylists = async (ownerId, options = {}) => {
-  const { roomId = '', filter = null } = options;
+  const { roomId = '', filter = null, search = '' } = options;
 
   const rows = await db.getTable('roomPlaylists').search({
-    q: playlistCriteria(ownerId, roomId, filter),
+    q: playlistCriteria(ownerId, roomId, filter, search),
     select: 'COUNT(*) AS total',
     join:
       filter === 'room'
@@ -565,7 +571,7 @@ export default function playerManager(socket, emitTo, socketTo) {
    */
   socket.on('list-playlists', async (data, fn) => {
     if (noDataInfo(data, fn)) return;
-    const { roomId, filter, limit } = data;
+    const { roomId, filter, limit, search } = data;
 
     if (typeof roomId !== 'string' || (typeof filter !== 'string' && filter !== null))
       return sendIncompleteDataInfo(fn);
@@ -581,7 +587,7 @@ export default function playerManager(socket, emitTo, socketTo) {
     // `global` and `room` are the only filters the database knows about;
     // anything else (including the `all` of the manager) means "no filter".
     const scope = filter === 'global' || filter === 'room' ? filter : null;
-    const options = { roomId, filter: scope, limit: normalizeLimit(limit) };
+    const options = { roomId, filter: scope, limit: normalizeLimit(limit), search };
 
     // The list belongs to the room owner, so a moderator sees the same
     // playlists the owner configured.
