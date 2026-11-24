@@ -372,10 +372,14 @@ export default function playerManager(socket, emitTo, socketTo) {
     for (const row of list) {
       const playlist = serializePlaylist(row, await loadPlaylistRooms(row.playlistId));
 
-      if (filter === 'all' && playlist.scope !== 'all') continue;
-      if (filter === 'room' && !playlistCoversRoom(playlist, roomId)) continue;
-      if (filter !== 'all' && filter !== 'room' && !playlistCoversRoom(playlist, roomId))
-        continue;
+      // `all` is the "no filter" option of the manager, `global` narrows the
+      // list down to the playlists available on every room of the owner and
+      // `room` keeps only the ones that can be used on this room.
+      if (filter === 'global') {
+        if (playlist.scope !== 'all') continue;
+      } else if (filter === 'room') {
+        if (!playlistCoversRoom(playlist, roomId)) continue;
+      }
 
       playlists.push(playlist);
     }
@@ -550,10 +554,19 @@ export default function playerManager(socket, emitTo, socketTo) {
 
     switch (action) {
       case 'play':
-      case 'pause':
+      case 'pause': {
         next.playing = action === 'play';
-        next.position = Math.max(0, toNumber(position, currentPosition));
+        let nextPosition = Math.max(0, toNumber(position, currentPosition));
+
+        // Resuming a playlist that already reached the end has to start it
+        // over, otherwise the room would stay stuck on the last second of the
+        // last track forever.
+        if (next.playing && current.duration > 0 && nextPosition >= current.duration)
+          nextPosition = 0;
+
+        next.position = nextPosition;
         break;
+      }
 
       case 'seek':
         next.position = Math.max(0, toNumber(position, currentPosition));
@@ -580,11 +593,25 @@ export default function playerManager(socket, emitTo, socketTo) {
         break;
       }
 
-      case 'track':
-        next.trackIndex = Math.max(0, Math.floor(toNumber(trackIndex, current.trackIndex)));
+      // The DJ pressed "next" (or a client reached the end of the track). The
+      // index is clamped against the real playlist: an out of range index used
+      // to be stored as is, which left the whole room with a track that does
+      // not exist and no way to recover but picking the playlist again.
+      case 'track': {
+        const playlist = current.playlistId ? await getPlaylist(current.playlistId) : null;
+        const total = Array.isArray(playlist?.tracks) ? playlist.tracks.length : 0;
+        const wanted = Math.floor(toNumber(trackIndex, current.trackIndex));
+        const lastIndex = total > 0 ? total - 1 : 0;
+
+        next.trackIndex = Math.min(Math.max(0, wanted), lastIndex);
         next.position = 0;
         next.duration = 0;
+
+        // Skipping a track is an explicit interaction: the room expects to
+        // hear the new track even when the player was paused.
+        next.playing = true;
         break;
+      }
 
       case 'playlist': {
         if (typeof playlistId !== 'string')

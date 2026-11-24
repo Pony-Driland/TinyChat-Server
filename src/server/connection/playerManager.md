@@ -119,8 +119,10 @@ Applies an interaction and broadcasts `player-updated` to the room.
 | `play`     | `position`                | Resumes the playback.                              |
 | `pause`    | `position`                | Pauses the playback.                               |
 | `seek`     | `position`                | Moves the playhead, in seconds.                    |
-| `track`    | `trackIndex`              | Jumps to a track of the playlist.                  |
+| `track`    | `trackIndex`              | Jumps to a track of the playlist (clamped, plays). |
 | `volume`   | `volume`                  | Volume between `0` and `1`.                        |
+| `loop`     | `loop`                    | Repeats the playlist when it ends.                 |
+| `duration` | `duration`                | Reports the duration of the loaded media.          |
 | `playlist` | `playlistId`              | Loads a playlist. An empty id stops the player.    |
 
 **Errors**
