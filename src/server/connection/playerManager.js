@@ -485,6 +485,19 @@ export default function playerManager(socket, emitTo, socketTo) {
     if (!userId) return accountNotDetected(fn);
     if (roomUpdateIsRateLimited(socket, fn)) return;
 
+    // The owner configures the server, so the limits do not apply.
+    const isOwner = userId === getIniConfig('OWNER_ID');
+
+    if (!isOwner) {
+      const maxTracks = getIniConfig('MAX_TRACKS_PER_PLAYLIST');
+      if (maxTracks > 0 && normalizedTracks.length > maxTracks)
+        return fn({
+          error: true,
+          code: 4,
+          msg: `A playlist may hold at most ${maxTracks} track(s).`,
+        });
+    }
+
     const playlistScope = scope === 'rooms' ? 'rooms' : 'all';
     const playlistMode = mode === 'raffle' ? 'raffle' : 'ordered';
     const playlistRaffle = normalizeRaffle(raffle);
@@ -526,6 +539,26 @@ export default function playerManager(socket, emitTo, socketTo) {
       }
 
       return fn({ success: true, playlist });
+    }
+
+    // A new playlist is being created: the account may have hit its quota.
+    if (!isOwner) {
+      const maxPlaylists = getIniConfig('MAX_PLAYLISTS_PER_USER');
+
+      if (maxPlaylists > 0) {
+        const owned = await table.search({
+          q: { group: 'AND', conditions: [{ column: 'ownerId', value: userId }] },
+        });
+
+        const total = (Array.isArray(owned) ? owned : (owned?.items ?? [])).length;
+
+        if (total >= maxPlaylists)
+          return fn({
+            error: true,
+            code: 5,
+            msg: `You have reached the limit of ${maxPlaylists} playlist(s).`,
+          });
+      }
     }
 
     const id = randomUUID();

@@ -761,7 +761,28 @@ export default function roomManager(socket, emitTo, socketTo, socketEmit) {
     // Check if the room exists
     const rooms = db.getTable('rooms');
     let room = await rooms.get(roomId);
+
     if (!room) {
+      // The owner configures the server, so the quota does not apply.
+      if (userId !== getIniConfig('OWNER_ID')) {
+        const maxRooms = getIniConfig('MAX_ROOMS_PER_USER');
+
+        if (maxRooms > 0) {
+          const owned = await rooms.search({
+            q: { group: 'AND', conditions: [{ column: 'ownerId', value: userId }] },
+          });
+
+          const total = (Array.isArray(owned) ? owned : (owned?.items ?? [])).length;
+
+          if (total >= maxRooms)
+            return fn({
+              error: true,
+              code: 4,
+              msg: `You have reached the limit of ${maxRooms} room(s).`,
+            });
+        }
+      }
+
       await createRoom(userId, roomId, password, title);
       return fn({ success: true });
     }
