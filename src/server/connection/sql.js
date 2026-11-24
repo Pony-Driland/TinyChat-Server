@@ -258,6 +258,11 @@ export const startDatabase = async (appStorage) => {
       ['name', 'TEXT'],
       ['tracks', 'JSON', 'NOT NULL'],
       ['scope', 'TEXT', 'NOT NULL DEFAULT \'all\''],
+      // How the playlist is walked: `ordered` follows the list, `raffle`
+      // draws the next track with the advanced raffle.
+      ['mode', 'TEXT', "DEFAULT 'ordered'"],
+      // Draw configuration of the raffle, when `mode` is `raffle`.
+      ['raffle', 'JSON'],
       ['date', 'INTEGER', 'NOT NULL'],
       ['updatedAt', 'INTEGER', 'NOT NULL'],
     ]);
