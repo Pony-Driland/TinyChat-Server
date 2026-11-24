@@ -52,15 +52,16 @@ compensate for the clock skew before applying `livePosition`.
 Lists the playlists of the room owner.
 
 ```json
-{ "roomId": "lobby", "filter": "all" }
+{ "roomId": "lobby", "filter": "all", "limit": 50 }
 ```
 
 | Field    | Type             | Description                        |
 | -------- | ---------------- | ---------------------------------- |
 | `roomId` | `string`         | Room id.                           |
 | `filter` | `string \| null` | `global`, `room` or `null` (both). |
+| `limit`  | `number \| null` | Optional page size (max `100`).    |
 
-`filter` is applied server side:
+`filter` is applied by the database, so the server never loads the whole table:
 
 | Value    | Keeps                                                                             |
 | -------- | --------------------------------------------------------------------------------- |

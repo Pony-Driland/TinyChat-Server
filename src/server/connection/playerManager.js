@@ -29,6 +29,9 @@ import {
 /** How many tracks a playlist may hold. */
 export const MAX_PLAYLIST_TRACKS = 500;
 
+/** How many playlists `list-playlists` returns when no page size is given. */
+export const MAX_PLAYLIST_PAGE_SIZE = 100;
+
 /** How many rooms a `scope = 'rooms'` playlist may target. */
 export const MAX_PLAYLIST_ROOMS = 100;
 
@@ -210,6 +213,149 @@ const loadPlaylistRooms = async (playlistId) => {
 
   const list = Array.isArray(rows) ? rows : (rows?.items ?? []);
   return list.map((item) => item.roomId).filter((roomId) => typeof roomId === 'string');
+};
+
+/**
+ * Loads the rooms of several playlists with a single query.
+ *
+ * The listing used to read the rooms of one playlist at a time, which turned a
+ * page of 50 playlists into 51 round trips. A single `OR` group keeps it at one
+ * query, and the database still does all the work.
+ *
+ * @param {string[]} playlistIds - Playlist ids.
+ * @returns {Promise<Map<string, string[]>>}
+ */
+const loadPlaylistsRooms = async (playlistIds) => {
+  /** @type {Map<string, string[]>} */
+  const rooms = new Map();
+  if (!Array.isArray(playlistIds) || playlistIds.length < 1) return rooms;
+
+  const table = db.getTable('roomPlaylistRooms');
+  const rows = await table.search({
+    q: {
+      group: 'OR',
+      conditions: playlistIds.map((playlistId) => ({ column: 'playlistId', value: playlistId })),
+    },
+  });
+
+  const list = Array.isArray(rows) ? rows : (rows?.items ?? []);
+
+  for (const row of list) {
+    if (typeof row?.roomId !== 'string') continue;
+
+    const current = rooms.get(row.playlistId);
+    if (current) current.push(row.roomId);
+    else rooms.set(row.playlistId, [row.roomId]);
+  }
+
+  return rooms;
+};
+
+/**
+ * Builds the criteria of `list-playlists`.
+ *
+ * `global` is the "every room" option of the manager and `room` keeps the
+ * playlists that can be used on the given room. Both are resolved by the
+ * database, so the whole table never has to be sent to the server.
+ *
+ * @param {string} ownerId - Owner of the playlists.
+ * @param {string} roomId - Room used by the `room` filter.
+ * @param {string|null} filter - `global`, `room` or `null`.
+ * @returns {Record<string, any>}
+ */
+const playlistCriteria = (ownerId, roomId, filter) => {
+  const conditions = [{ column: 't.ownerId', value: ownerId }];
+
+  if (filter === 'global') {
+    conditions.push({ column: 't.scope', value: 'all' });
+  } else if (filter === 'room') {
+    conditions.push({
+      group: 'OR',
+      conditions: [
+        { column: 'j1.roomId', value: roomId },
+      ],
+    });
+  }
+
+  return { group: 'AND', conditions };
+};
+
+/**
+ * Lists the playlists of an owner, filtered by the database.
+ *
+ * @param {string} ownerId - Owner of the playlists.
+ * @param {object} [options] - Listing options.
+ * @param {string} [options.roomId] - Room used by the `room` filter.
+ * @param {string|null} [options.filter] - `global`, `room` or `null`.
+ * @param {number|null} [options.limit] - Page size, or `null` for every row.
+ * @returns {Promise<Record<string, any>[]>}
+ */
+const listOwnerPlaylists = async (ownerId, options = {}) => {
+  const { roomId = '', filter = null, limit = null } = options;
+  const table = db.getTable('roomPlaylists');
+
+  const rows = await table.search({
+    q: playlistCriteria(ownerId, roomId, filter),
+    select: 't.*',
+    // The join is only needed to resolve the rooms of a `scope = 'rooms'`
+    // playlist, and it is a primary key lookup, so it never duplicates a row.
+    join:
+      filter === 'room'
+        ? [
+            {
+              type: 'left',
+              table: 'roomPlaylistRooms',
+              compare: 't.playlistId = j1.playlistId',
+            },
+          ]
+        : undefined,
+    order: 't.name ASC, t.playlistId ASC',
+    ...(typeof limit === 'number' ? { limit } : {}),
+  });
+
+  return Array.isArray(rows) ? rows : (rows?.items ?? []);
+};
+
+/**
+ * Counts the playlists of an owner, using the same criteria as the listing.
+ *
+ * @param {string} ownerId - Owner of the playlists.
+ * @param {object} [options] - Counting options.
+ * @param {string} [options.roomId] - Room used by the `room` filter.
+ * @param {string|null} [options.filter] - `global`, `room` or `null`.
+ * @returns {Promise<number>}
+ */
+const countOwnerPlaylists = async (ownerId, options = {}) => {
+  const { roomId = '', filter = null } = options;
+
+  const rows = await db.getTable('roomPlaylists').search({
+    q: playlistCriteria(ownerId, roomId, filter),
+    select: 'COUNT(*) AS total',
+    join:
+      filter === 'room'
+        ? [
+            {
+              type: 'left',
+              table: 'roomPlaylistRooms',
+              compare: 't.playlistId = j1.playlistId',
+            },
+          ]
+        : undefined,
+  });
+
+  const total = Number((Array.isArray(rows) ? rows[0] : rows?.items?.[0])?.total);
+  return Number.isFinite(total) ? total : 0;
+};
+
+/**
+ * Normalizes the `limit` of `list-playlists`.
+ *
+ * @param {unknown} limit - Requested page size.
+ * @returns {number|null}
+ */
+const normalizeLimit = (limit) => {
+  if (typeof limit !== 'number' || !Number.isFinite(limit) || limit < 1) return null;
+  return Math.min(Math.floor(limit), MAX_PLAYLIST_PAGE_SIZE);
 };
 
 /**
@@ -413,11 +559,13 @@ export default function playerManager(socket, emitTo, socketTo) {
    * Lists the playlists the signed-in account can use on a room.
    *
    * `filter` narrows the result down to the playlists that are available on
-   * every room (`all`), only on the given room (`room`) or on both (`any`).
+   * every room (`global`), only on the given room (`room`) or on both (`any`).
+   * The filter, the ordering and the limit are all resolved by the database, so
+   * a room with hundreds of playlists never transfers the whole table.
    */
   socket.on('list-playlists', async (data, fn) => {
     if (noDataInfo(data, fn)) return;
-    const { roomId, filter } = data;
+    const { roomId, filter, limit } = data;
 
     if (typeof roomId !== 'string' || (typeof filter !== 'string' && filter !== null))
       return sendIncompleteDataInfo(fn);
@@ -430,36 +578,26 @@ export default function playerManager(socket, emitTo, socketTo) {
     const room = await rooms.get(roomId);
     if (!room) return fn({ error: true, msg: 'Room not found.', code: 1 });
 
+    // `global` and `room` are the only filters the database knows about;
+    // anything else (including the `all` of the manager) means "no filter".
+    const scope = filter === 'global' || filter === 'room' ? filter : null;
+    const options = { roomId, filter: scope, limit: normalizeLimit(limit) };
+
     // The list belongs to the room owner, so a moderator sees the same
     // playlists the owner configured.
-    const table = db.getTable('roomPlaylists');
-    const rows = await table.search({
-      q: { group: 'AND', conditions: [{ column: 'ownerId', value: room.ownerId }] },
-    });
+    const rows = await listOwnerPlaylists(room.ownerId, options);
 
-    const list = Array.isArray(rows) ? rows : (rows?.items ?? []);
-    const playlists = [];
-
-    for (const row of list) {
-      const playlist = serializePlaylist(row, await loadPlaylistRooms(row.playlistId));
-
-      // `all` is the "no filter" option of the manager, `global` narrows the
-      // list down to the playlists available on every room of the owner and
-      // `room` keeps only the ones that can be used on this room.
-      if (filter === 'global') {
-        if (playlist.scope !== 'all') continue;
-      } else if (filter === 'room') {
-        if (!playlistCoversRoom(playlist, roomId)) continue;
-      }
-
-      playlists.push(playlist);
-    }
-
-    playlists.sort((a, b) => a.name.localeCompare(b.name));
+    // The rooms of the whole page are loaded at once instead of one query per
+    // playlist.
+    const roomsByPlaylist = await loadPlaylistsRooms(rows.map((row) => row.playlistId));
+    const playlists = rows.map((row) =>
+      serializePlaylist(row, roomsByPlaylist.get(row.playlistId) ?? []),
+    );
 
     fn({
       success: true,
       playlists,
+      total: await countOwnerPlaylists(room.ownerId, options),
       player: await getPlayer(roomId),
       serverTime: Date.now(),
     });
@@ -634,8 +772,7 @@ export default function playerManager(socket, emitTo, socketTo) {
     const { roomId, action, playlistId, trackIndex, position, duration, volume, loop } = data;
     const { expectedRevision } = data;
 
-    if (typeof roomId !== 'string' || typeof action !== 'string')
-      return sendIncompleteDataInfo(fn);
+    if (typeof roomId !== 'string' || typeof action !== 'string') return sendIncompleteDataInfo(fn);
 
     const userId = userSession.getUserId(socket);
     if (!userId) return accountNotDetected(fn);
@@ -724,8 +861,7 @@ export default function playerManager(socket, emitTo, socketTo) {
       }
 
       case 'playlist': {
-        if (typeof playlistId !== 'string')
-          return sendIncompleteDataInfo(fn);
+        if (typeof playlistId !== 'string') return sendIncompleteDataInfo(fn);
 
         // An empty id stops the player and clears the playlist.
         if (playlistId.length < 1) {
