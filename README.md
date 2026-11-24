@@ -1,7 +1,8 @@
 # TinyChat Server
 
 **TinyChat** is a lightweight roleplay/RPG room server with real-time messaging, dice, room-level
-permissions and AI support, designed for integration with the PonyDriland website.
+permissions, a synchronized music player and AI support, designed for integration with the
+PonyDriland website.
 The project is currently in **beta**, but it is **fully available for free download and testing**.
 
 TinyChat aims to provide a simple, modular, and efficient environment for real-time interactions in
@@ -21,6 +22,7 @@ functional and ready for community feedback.
 - **Read-only guests** — every account joins as a guest and needs an explicit permission to talk
 - **Chapters** — a room can be split into multiple chapters of history
 - **Dice** with custom skins, modifiers and a full roll history
+- **Synchronized music player** — playlists (YouTube / audio file) shared by the whole room
 - **AI support** — messages can be flagged as model output, with `model`, `tokens` and `errorCode`
 - **Safety backup** — deleted messages go to `historyDeleted` and can be restored
 - **SQLite 3 or PostgreSQL** as the database
@@ -33,10 +35,10 @@ functional and ready for community feedback.
 yarn install
 
 # 2. Start the server (creates tiny-chat_data/ on the first run)
-yarn start
+yarn dev
 
 # 3. In another terminal, start the optional HTTPS proxy
-yarn start:proxy
+yarn dev:proxy
 ```
 
 The server reads `tiny-chat_data/config.ini` (created from
@@ -62,10 +64,11 @@ node src/launcher.js --set server.port=8080 --set database.type=postgre
 
 | Command | Description |
 | --- | --- |
-| `yarn start` | Starts the chat server |
-| `yarn start:proxy` | Starts the Socket.IO proxy |
-| `yarn build` | Bundles the binaries with esbuild |
+| `yarn dev` | Starts the chat server (Babel, no build step) |
+| `yarn dev:proxy` | Starts the Socket.IO proxy |
+| `yarn build` | Bundles the standalone binaries with esbuild + nexe |
 | `yarn test` | Runs the test suite (`node --test`) |
+| `yarn test:watch` | Runs the test suite in watch mode |
 
 A single launcher can also start any mode:
 
@@ -83,6 +86,8 @@ tiny-chat-all --app archive rooms
 | [`src/server/connection/userManager.md`](src/server/connection/userManager.md) | `login`, `register`, `ban`, staff, account settings |
 | [`src/server/connection/roomManager.md`](src/server/connection/roomManager.md) | Rooms, moderation, permissions, settings |
 | [`src/server/connection/messageManager.md`](src/server/connection/messageManager.md) | Messages, history, dice and purge |
+| [`src/server/connection/playerManager.md`](src/server/connection/playerManager.md) | Playlists and the synchronized music player |
+| [`src/proxy/README.md`](src/proxy/README.md) | Socket.IO proxy |
 | [`docs/tiny-chat-archive-cli.md`](docs/tiny-chat-archive-cli.md) | Archive CLI (export, import, restore, trash) |
 
 ## 📦 Chat Archive CLI
@@ -120,7 +125,8 @@ TinyChat supports two backends, selected with `database.type`:
 The schema is created and migrated automatically on boot. Tables:
 `rooms`, `roomTokens`, `roomHash`, `roomModerators`, `roomMembers`, `roomBannedUsers`,
 `roomPermissions`, `history`, `historyDeleted`, `diceHistory`, `users`, `usersDice`, `moderators`,
-`banned`, `privateRoomData`, `roomData`, `rpgSchema`, `audit`.
+`banned`, `privateRoomData`, `roomData`, `rpgSchema`, `roomPlaylists`, `roomPlaylistRooms`,
+`roomPlayer`, `audit`.
 
 ## 📥 Download & Usage
 

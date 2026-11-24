@@ -500,4 +500,23 @@ rolls are gone.
 | `dice-roll-deleted` | room    | A dice roll was deleted              |
 | `dice-rolls-purged` | room    | A bulk delete of dice rolls happened |
 
-> Large payloads are split by [`stream.js`](./stream.js) before being emitted.
+> `new-message` and `message-updated` go through `createStreamBroadcast()`, so they may arrive
+> chunked. Every other event is emitted untouched.
+
+## Chunked transfer
+
+Socket.IO serializes the whole packet on the server and parses it back on the client, both on the
+main thread, and the transport rejects anything above 1 MB. A multi-megabyte roleplay message would
+freeze the tab, so [`stream.js`](./stream.js) splits it up.
+
+Payloads **up to 256 KB** (`STREAM_THRESHOLD`) are emitted untouched. Anything bigger is serialized
+once and sliced into 64 KB (`STREAM_CHUNK_SIZE`) chunks:
+
+| Event          | Payload                                               |
+| -------------- | ----------------------------------------------------- |
+| `stream-start` | `{ id, event, total, size }`                          |
+| `stream-chunk` | `{ id, index, data }` — `data` is a slice of the JSON |
+| `stream-end`   | `{ id }`                                              |
+
+The client concatenates every `data` in `index` order and only then parses the JSON, so the event
+name in `stream-start` tells which handler should receive the rebuilt payload.

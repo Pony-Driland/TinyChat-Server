@@ -264,7 +264,7 @@ Bans an account and disconnects it immediately. Available to the server owner an
 
 ### `kick`
 
-Accepts a single id or an array of ids.
+Accepts a single id or an array of ids. Available to the server owner and the staff.
 
 ```json
 { "userId": ["bob", "carol"] }
@@ -272,8 +272,16 @@ Accepts a single id or an array of ids.
 
 **Response**
 
+One entry per requested id, in the same order:
+
 ```json
-{ "success": true, "data": [{ "success": true }] }
+{
+  "success": true,
+  "data": [
+    { "userId": "bob", "success": true },
+    { "userId": "carol", "error": true, "msg": "User not found.", "code": 2 }
+  ]
+}
 ```
 
 **Errors**

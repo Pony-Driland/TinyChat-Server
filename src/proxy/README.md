@@ -19,7 +19,7 @@ The proxy opens an **outbound** connection, so it works behind NAT, CGNAT and dy
 
 ```bash
 # From the repository root
-yarn start:proxy
+yarn dev:proxy
 
 # or through the unified launcher
 tiny-chat-all --app proxy
@@ -27,6 +27,8 @@ tiny-chat-all --app proxy
 
 On the first run the proxy creates `tiny-chat_proxy/` next to the executable and copies
 [`proxy-config.ini`](./proxy-config.ini) into it.
+
+The proxy also answers `-h`/`--help` and `-v`/`--version`.
 
 ## Configuration
 

@@ -61,15 +61,19 @@ Lists the rooms the signed-in account is allowed to see, ordered by the last mes
 }
 ```
 
-| Field       | Type             | Description                                          |
-| ----------- | ---------------- | ---------------------------------------------------- |
-| `search`    | `string \| null` | Case-insensitive match on `roomId` and `title`       |
-| `scope`     | `string \| null` | `mine` (default), `visited` or `all`                 |
-| `openOnly`  | `boolean`        | Only rooms with `disabled = false`                   |
-| `ownedOnly` | `boolean`        | Only rooms owned by the caller                       |
-| `language`  | `string \| null` | ISO 639-1 code. `null` lists every language          |
-| `page`      | `number`         | Page, starting at `1`                                |
-| `perPage`   | `number`         | Page size                                            |
+| Field       | Type             | Description                                           |
+| ----------- | ---------------- | ----------------------------------------------------- |
+| `search`    | `string \| null` | Case-insensitive match on `roomId` and `title`        |
+| `scope`     | `string \| null` | `all` widens the list to the whole server (see below) |
+| `openOnly`  | `boolean`        | Only rooms with `disabled = false`                    |
+| `ownedOnly` | `boolean`        | Only rooms owned by the caller                        |
+| `language`  | `string \| null` | ISO 639-1 code. `null` lists every language           |
+| `page`      | `number`         | Page, starting at `1`                                 |
+| `perPage`   | `number`         | Page size                                             |
+
+`scope` only has two behaviours: `"all"` lists every room of the server (subject to the rules
+below) and **any other value** (`"mine"`, `"visited"`, `null`, ...) lists only the rooms the
+account owns or already joined.
 
 **Response**
 
@@ -375,6 +379,9 @@ Accepts a single id or an array of ids. The room owner and the server owner can 
 | ---- | ---------------------------------------------------------- |
 | `1`  | This room already exists                                   |
 | `2`  | The room id does not have the minimum number of characters |
+| `4`  | The account reached `limits.MAX_ROOMS_PER_USER` rooms      |
+
+> The server owner ignores `limits.MAX_ROOMS_PER_USER`.
 
 ---
 
@@ -542,7 +549,8 @@ individually — an invalid value is silently ignored instead of failing the who
     "frequencyPenalty": 0,
     "maxUsers": 50,
     "chapter": 2,
-    "public": true
+    "public": true,
+    "language": "en"
   }
 }
 ```
@@ -559,6 +567,11 @@ individually — an invalid value is silently ignored instead of failing the who
 | `maxUsers`                                                                              | Clamped between `1` and `limits.MAX_USERS_PER_ROOM`  |
 | `chapter`                                                                               | Integer `>= 1`                                       |
 | `public`                                                                                | `boolean`                                            |
+| `language`                                                                              | ISO 639-1 code, or `null`/`""` to clear it           |
+
+`language` is normalized by `normalizeRoomLanguage()`: lowercase, `2`-`3` letters with an optional
+region (`pt`, `pt-br`, `ja`). Any other value fails the whole request with the incomplete-data
+error, so send `null` (or `""`) to remove the language of a room.
 
 **Broadcast — `room-updated`**
 

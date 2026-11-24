@@ -286,17 +286,19 @@ want after an accidental delete, a bad moderation action or a failed purge.
 tiny-rpg-chat-archive restore [options]
 ```
 
-| Option            | Description                                           |
-| ----------------- | ----------------------------------------------------- |
-| `-r, --room <id>` | Room to restore into (asks if omitted)                |
-| `-n, --limit <n>` | Restore the **n newest** messages                     |
-| `--dates <n>`     | Restore every message from the **n most recent days** |
-| `--all`           | Restore the whole backup of the room                  |
-| `--overwrite`     | Replace rows that already exist in `history`          |
-| `--dry-run`       | Print the report without writing                      |
-| `-y, --yes`       | Skip the confirmation (for scripts)                   |
+| Option             | Description                                           |
+| ------------------ | ----------------------------------------------------- |
+| `-r, --room <id>`  | Room to restore into (asks if omitted)                |
+| `-n, --limit <n>`  | Restore the **n newest** messages                     |
+| `--dates <n>`      | Restore every message from the **n most recent days** |
+| `--older-than <n>` | Restore every message **older** than `n` days         |
+| `--all`            | Restore the whole backup of the room                  |
+| `--overwrite`      | Replace rows that already exist in `history`          |
+| `--dry-run`        | Print the report without writing                      |
+| `-y, --yes`        | Skip the confirmation (for scripts)                   |
 
-> Exactly **one** of `--limit`, `--dates`, `--all` is required. Passing none (or more than one) is an error.
+> Exactly **one** of `--limit`, `--dates`, `--older-than` or `--all` is required. Passing none (or
+> more than one) is an error.
 
 ```bash
 # The 25 most recent deleted messages
@@ -513,10 +515,11 @@ printf '1\nA\n' | tiny-rpg-chat-archive export
 
 Without `--data-dir`, the CLI tries, in order:
 
-1. `$TINY_CHAT_DATA`
-2. `./src/tiny-chat_data`
-3. `./tiny-chat_data`
-4. `tiny-chat_data` next to the executable
+1. `--data-dir <path>` (when given, it is the only candidate)
+2. `$TINY_CHAT_DATA`
+3. `./src/tiny-chat_data`
+4. `./tiny-chat_data`
+5. `tiny-chat_data` next to the executable
 
 When the folder has no `config.ini`, the template at `src/server/config.ini` is used and a warning
 is printed.
