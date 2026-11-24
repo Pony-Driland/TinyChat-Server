@@ -42,6 +42,14 @@ const MAX_TRACK_ID = 256;
 export const TRACK_TYPES = ['youtube', 'audio-file'];
 
 /**
+ * Shape of a YouTube video id.
+ *
+ * The client interpolates it into the iframe URL, so the server refuses
+ * anything that is not the 11 characters of the URL safe alphabet.
+ */
+const YOUTUBE_ID = /^[A-Za-z0-9_-]{11}$/;
+
+/**
  * Normalizes a single track sent by the client.
  *
  * Only the two providers the reader already knows are accepted, and the id is
@@ -63,6 +71,10 @@ const normalizeTrack = (track) => {
 
   // `audio-file` folders are paths inside `public/audio`, never a URL.
   if (type === 'audio-file' && (trackId.includes('..') || trackId.startsWith('/'))) return null;
+
+  // A YouTube id is what the client interpolates into the iframe URL, so the
+  // shape is enforced here too: the client is not the only way in.
+  if (type === 'youtube' && !YOUTUBE_ID.test(trackId)) return null;
 
   const file = typeof track.file === 'number' && Number.isFinite(track.file) ? track.file : 0;
   const title = typeof track.title === 'string' ? track.title.substring(0, 200) : null;
