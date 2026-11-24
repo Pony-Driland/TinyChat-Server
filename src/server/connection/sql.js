@@ -330,7 +330,25 @@ export const startDatabase = async (appStorage) => {
       );
     });
 
-    await db.startMigration(2);
+    db.migrator.addMigration(3, async (database) => {
+      // `mode` is how the playlist is walked: `ordered` follows the list,
+      // `raffle` draws the next track with the advanced raffle.
+      await database.run(
+        'ALTER TABLE roomPlaylists ADD COLUMN mode TEXT DEFAULT \'ordered\'',
+        undefined,
+        'migration.roomPlaylists.mode',
+      );
+
+      // `raffle` keeps the draw configuration and the order that was drawn,
+      // so every listener plays the very same sequence.
+      await database.run(
+        'ALTER TABLE roomPlaylists ADD COLUMN raffle TEXT',
+        undefined,
+        'migration.roomPlaylists.raffle',
+      );
+    });
+
+    await db.startMigration(3);
 
     // Complete
     console.log(`[APP] [${config.database.type}] Database connection opened.`);

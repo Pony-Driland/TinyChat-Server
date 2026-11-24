@@ -38,6 +38,9 @@ export const MAX_PLAYLIST_NAME = 80;
 /** Longest accepted track id. */
 const MAX_TRACK_ID = 256;
 
+/** Longest accepted draw configuration, in characters. */
+const MAX_RAFFLE_SIZE = 8192;
+
 /** Track providers accepted by the player. */
 export const TRACK_TYPES = ['youtube', 'audio-file'];
 
@@ -107,6 +110,60 @@ export const normalizeTracks = (tracks) => {
  * @param {unknown} value - Stored value.
  * @returns {Array<object>}
  */
+/**
+ * Parses a JSON string, falling back to `null`.
+ *
+ * @param {string} value - Raw value.
+ * @returns {unknown}
+ */
+const safeJson = (value) => {
+  try {
+    return JSON.parse(value);
+  } catch {
+    return null;
+  }
+};
+
+/**
+ * Parses the `raffle` column, which is stored as JSON.
+ *
+ * The draw configuration is opaque to the server: it is written by the client
+ * that owns the playlist and replayed by every listener, so it is only checked
+ * for shape here.
+ *
+ * @param {unknown} value - Stored value.
+ * @returns {object|null}
+ */
+const parseRaffle = (value) => {
+  const parsed = typeof value === 'string' ? safeJson(value) : value;
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
+
+  return parsed;
+};
+
+/**
+ * Normalizes the draw configuration of a playlist.
+ *
+ * @param {unknown} raffle - Raw configuration.
+ * @returns {string|null} The serialized configuration, or `null`.
+ */
+const normalizeRaffle = (raffle) => {
+  if (raffle === null || typeof raffle === 'undefined') return null;
+  if (typeof raffle !== 'object' || Array.isArray(raffle)) return null;
+
+  const serialized = JSON.stringify(raffle);
+
+  // The column is a configuration, not a payload: anything bigger than this is
+  // a mistake (or an attack) and would slow every listener down.
+  return serialized.length > MAX_RAFFLE_SIZE ? null : serialized;
+};
+
+/**
+ * Parses the `tracks` column, which is stored as JSON.
+ *
+ * @param {unknown} value - Stored value.
+ * @returns {Array<object>}
+ */
 const parseTracks = (value) => {
   if (Array.isArray(value)) return value;
   if (typeof value !== 'string') return [];
@@ -133,6 +190,8 @@ const serializePlaylist = (row, rooms = []) => ({
   tracks: parseTracks(row.tracks),
   scope: row.scope === 'rooms' ? 'rooms' : 'all',
   rooms,
+  mode: row.mode === 'raffle' ? 'raffle' : 'ordered',
+  raffle: parseRaffle(row.raffle),
   date: typeof row.date === 'number' ? row.date : 0,
   updatedAt: typeof row.updatedAt === 'number' ? row.updatedAt : 0,
 });
@@ -409,7 +468,7 @@ export default function playerManager(socket, emitTo, socketTo) {
   /** Creates a playlist or updates one owned by the signed-in account. */
   socket.on('save-playlist', async (data, fn) => {
     if (noDataInfo(data, fn)) return;
-    const { playlistId, name, tracks, scope, rooms } = data;
+    const { playlistId, name, tracks, scope, rooms, mode, raffle } = data;
 
     if (
       (typeof playlistId !== 'string' && playlistId !== null) ||
@@ -427,6 +486,8 @@ export default function playerManager(socket, emitTo, socketTo) {
     if (roomUpdateIsRateLimited(socket, fn)) return;
 
     const playlistScope = scope === 'rooms' ? 'rooms' : 'all';
+    const playlistMode = mode === 'raffle' ? 'raffle' : 'ordered';
+    const playlistRaffle = normalizeRaffle(raffle);
     const roomList = playlistScope === 'rooms' ? [...new Set(rooms ?? [])] : [];
 
     if (roomList.length > MAX_PLAYLIST_ROOMS) return sendIncompleteDataInfo(fn);
@@ -446,6 +507,8 @@ export default function playerManager(socket, emitTo, socketTo) {
         name: cleanName,
         tracks: JSON.stringify(normalizedTracks),
         scope: playlistScope,
+        mode: playlistMode,
+        raffle: playlistRaffle,
         updatedAt: now,
       });
       await replacePlaylistRooms(playlistId, roomList);
@@ -471,6 +534,8 @@ export default function playerManager(socket, emitTo, socketTo) {
       name: cleanName,
       tracks: JSON.stringify(normalizedTracks),
       scope: playlistScope,
+      mode: playlistMode,
+      raffle: playlistRaffle,
       date: now,
       updatedAt: now,
     });
