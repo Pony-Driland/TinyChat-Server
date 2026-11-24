@@ -1,6 +1,6 @@
 {
     "name": "tiny-rpg-chat-server",
-    "version": "1.0.0",
+    "version": "1.0.0-test-5",
     "description": "Lightweight roleplay/RPG chat room server",
     "engines": {
         "node": ">=20.0.0"
