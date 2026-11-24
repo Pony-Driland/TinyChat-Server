@@ -310,6 +310,27 @@ const toNumber = (value, fallback) =>
   typeof value === 'number' && Number.isFinite(value) ? value : fallback;
 
 /**
+ * Lists the rooms a playlist is available on.
+ *
+ * A `scope = 'all'` playlist lives on every room of its owner, so the rooms
+ * have to be resolved before an update can be broadcast.
+ *
+ * @param {Record<string, any>} playlist - Serialized playlist.
+ * @returns {Promise<string[]>}
+ */
+const playlistRooms = async (playlist) => {
+  if (playlist.scope !== 'all') return playlist.rooms;
+
+  const table = db.getTable('rooms');
+  const rows = await table.search({
+    q: { group: 'AND', conditions: [{ column: 'ownerId', value: playlist.ownerId }] },
+  });
+
+  const list = Array.isArray(rows) ? rows : (rows?.items ?? []);
+  return list.map((room) => room.roomId).filter((roomId) => typeof roomId === 'string');
+};
+
+/**
  * Registers the music player events.
  *
  * @param {import('socket.io').Socket} socket - Client socket.
@@ -413,7 +434,19 @@ export default function playerManager(socket, emitTo, socketTo) {
       });
       await replacePlaylistRooms(playlistId, roomList);
 
-      return fn({ success: true, playlist: await getPlaylist(playlistId) });
+      const playlist = await getPlaylist(playlistId);
+
+      // Every listener has to follow the new version, including the DJ that
+      // saved it: the tracks are what turn a `trackIndex` into something
+      // playable, so a stale copy keeps playing the old song forever.
+      //
+      // `emitTo` is used on purpose: `socketTo` is `socket.to(room)`, which
+      // skips the sender, so the DJ would never see their own change.
+      for (const roomId of await playlistRooms(playlist)) {
+        emitTo(roomId, 'playlist-updated', { roomId, playlist });
+      }
+
+      return fn({ success: true, playlist });
     }
 
     const id = randomUUID();
@@ -445,8 +478,18 @@ export default function playerManager(socket, emitTo, socketTo) {
     if (!current) return fn({ error: true, msg: 'Playlist not found.', code: 1 });
     if (current.ownerId !== userId) return ownerOnly(fn, 2);
 
+    const playlist = await getPlaylist(playlistId);
+
     await replacePlaylistRooms(playlistId, []);
     await table.delete(playlistId);
+
+    // A deleted playlist can no longer be resolved, so the rooms are told to
+    // drop it instead of keeping a ghost entry in the list.
+    if (playlist) {
+      for (const roomId of await playlistRooms(playlist)) {
+        emitTo(roomId, 'playlist-deleted', { roomId, playlistId });
+      }
+    }
 
     fn({ success: true });
   });
@@ -582,7 +625,7 @@ export default function playerManager(socket, emitTo, socketTo) {
     // Every client of the room, including the DJ's other tabs, follows the
     // same event, so the state can never drift between them.
     const serverTime = Date.now();
-    socketTo(roomId, 'player-updated', { roomId, player, serverTime });
+    emitTo(roomId, 'player-updated', { roomId, player, serverTime });
 
     fn({ success: true, player, serverTime });
   });
