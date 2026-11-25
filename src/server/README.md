@@ -18,7 +18,7 @@ functional and ready for community feedback.
 
 ```bash
 # From the repository root
-yarn start
+yarn dev
 ```
 
 On the first run the server creates `tiny-chat_data/` next to the executable and copies
@@ -35,6 +35,8 @@ Every `config.ini` value can be overridden from the command line, which is handy
 ```bash
 node src/launcher.js --set server.port=8080 --set database.type=postgre
 ```
+
+The server also answers `-h`/`--help` (usage) and `-v`/`--version`.
 
 ## ⚙️ Configuration
 
@@ -63,9 +65,14 @@ The `limits` section drives every validation and rate limit. The most relevant k
 | `MODEL_ID_SIZE` | Model identifier size |
 | `HISTORY_SIZE` | Page size of `load-messages` |
 | `MAX_USERS_PER_ROOM` / `MAX_ONLINE_ACCOUNTS` | Capacity |
+| `MAX_ROOMS_PER_USER` | Rooms a single account may own |
+| `MAX_PLAYLISTS_PER_USER` / `MAX_TRACKS_PER_PLAYLIST` | Music player quotas |
 | `MESSAGES`, `MESSAGES_EDIT`, `MESSAGES_DELETE`, `MESSAGES_LOAD`, `ROOM_UPDATES`, `DICE_ROLLS`, `EVENT` | Rate limits |
 | `RATE_LIMIT_TIME` | Rate limit window (ms) |
 | `DICE_*` | Dice amount, sides and skin sizes |
+
+The server owner (`genesis.owner_id`) ignores every per-account quota (`MAX_ROOMS_PER_USER`,
+`MAX_PLAYLISTS_PER_USER`, `MAX_TRACKS_PER_PLAYLIST`).
 
 ## 🗄️ Database
 
@@ -74,11 +81,13 @@ The `limits` section drives every validation and rate limit. The most relevant k
 | `sqlite3` | Zero configuration, `tiny-chat_data/database.db` |
 | `postgre` | Uses `user`, `host`, `database`, `password` and `port` |
 
-The schema is created and migrated automatically on boot. Tables:
+The schema is created and migrated automatically on boot (`db.migrator`, currently at version `3`).
+Tables:
 
 `rooms`, `roomTokens`, `roomHash`, `roomModerators`, `roomMembers`, `roomBannedUsers`,
 `roomPermissions`, `history`, `historyDeleted`, `diceHistory`, `users`, `usersDice`, `moderators`,
-`banned`, `privateRoomData`, `roomData`, `rpgSchema`, `audit`.
+`banned`, `privateRoomData`, `roomData`, `rpgSchema`, `roomPlaylists`, `roomPlaylistRooms`,
+`roomPlayer`, `audit`.
 
 ## 🧱 Source layout
 
@@ -91,7 +100,10 @@ The schema is created and migrated automatically on boot. Tables:
 | [`connection/userManager.js`](./connection/userManager.js) | Authentication, accounts, staff and moderation |
 | [`connection/roomManager.js`](./connection/roomManager.js) | Rooms, membership, permissions and settings |
 | [`connection/messageManager.js`](./connection/messageManager.js) | Messages, history, dice and purge |
+| [`connection/playerManager.js`](./connection/playerManager.js) | Playlists and the synchronized music player |
 | [`connection/stream.js`](./connection/stream.js) | Splits large payloads before broadcasting |
+| [`../api/`](../api) | INI loading, `--set` overrides and the `--help` texts |
+| [`../launcher.js`](../launcher.js) | `--app server\|proxy\|archive` unified launcher |
 
 ## 🔐 Roles
 
@@ -110,6 +122,8 @@ Every account joins a room as a **read-only guest**. The room owner must call
 - [`connection/userManager.md`](./connection/userManager.md) — `login`, `register`, `ban`, staff, account settings
 - [`connection/roomManager.md`](./connection/roomManager.md) — rooms, moderation, permissions, settings
 - [`connection/messageManager.md`](./connection/messageManager.md) — messages, history, dice, purge
+- [`connection/playerManager.md`](./connection/playerManager.md) — playlists and the music player
+- [`../proxy/README.md`](../proxy/README.md) — Socket.IO proxy
 - [`../../docs/tiny-chat-archive-cli.md`](../../docs/tiny-chat-archive-cli.md) — archive CLI
 
 ## 🧩 About the Project
