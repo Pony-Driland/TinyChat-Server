@@ -843,6 +843,11 @@ export default function roomManager(socket, emitTo, socketTo, socketEmit) {
         msg: 'Your password is incorrect.',
       });
 
+    if (await rooms.has(roomId)) await rooms.delete(roomId);
+
+    // Room delete successfully.
+    fn({ success: true });
+
     // Disconnect user from rooms
     if (rUsers) {
       const leaves = [];
@@ -852,11 +857,6 @@ export default function roomManager(socket, emitTo, socketTo, socketEmit) {
       await Promise.all(leaves);
       roomUsers.delete(roomId);
     }
-
-    if (await rooms.has(roomId)) await rooms.delete(roomId);
-
-    // Room delete successfully.
-    fn({ success: true });
   });
 
   socket.on('disable-readonly-room', async (data, fn) => {
