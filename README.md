@@ -88,6 +88,7 @@ tiny-chat-all --app archive rooms
 | [`src/server/connection/messageManager.md`](src/server/connection/messageManager.md) | Messages, history, dice and purge |
 | [`src/server/connection/playerManager.md`](src/server/connection/playerManager.md) | Playlists and the synchronized music player |
 | [`src/proxy/README.md`](src/proxy/README.md) | Socket.IO proxy |
+| [`docs/jami-hosting.md`](docs/jami-hosting.md) | Hosting from home with Jami Shared services |
 | [`docs/tiny-chat-archive-cli.md`](docs/tiny-chat-archive-cli.md) | Archive CLI (export, import, restore, trash) |
 
 ## 📦 Chat Archive CLI
@@ -112,6 +113,22 @@ JSON file and import it back, with interactive room/chapter selection.
 The website **ponydriland.com** will only accept connections from servers hosted using **HTTPS**.
 If your TinyChat server is running locally at home, you may use the built-in **proxy** as a
 shortcut to securely expose your database through an HTTPS-enabled tunnel.
+
+### Hosting from home with Jami (no port forwarding)
+
+If you just want to play with your friends, you do not need a public IP, a domain or a certificate.
+Grab the ready-to-run binary from the [**Releases**](https://github.com/Pony-Driland/TinyChat-Server/releases)
+page (no Node.js required), run it on your own machine and share it through
+**[Jami](https://jami.net/) Shared services**:
+
+1. Start TinyChat and keep the default port `35421`.
+2. In Jami, open **Settings → Shared services** and share the local port `35421`.
+3. Enable **“Use local port as preferred ports on peers”** so your friends do not need to configure
+   anything on their side.
+4. Your friends open the official **PonyDriland** website and connect to your server from there —
+   the browser will ask for permission to reach `http://localhost:35421`, which is expected.
+
+📖 **[Full Jami hosting guide →](docs/jami-hosting.md)**
 
 ## 🗄️ Database
 
