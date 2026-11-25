@@ -24,7 +24,7 @@ Friend's browser ──HTTPS──▶ ponydriland.com
 
 1. TinyChat listens on `localhost` on your machine (default port `35421`).
 2. Jami exposes that local port through its **Shared services** (a peer-to-peer tunnel).
-3. Your friends open the official **PonyDriland** website and connect to your server.
+3. Your friends open the official **Pony Driland** website and connect to your server.
 4. The website runs on `https://` and talks to `http://localhost:<port>` on the visitor's machine,
    where Jami is listening and forwarding the traffic to you.
 
@@ -82,7 +82,7 @@ discover and type it manually.
 
 1. Your friends install Jami and add you as a contact (or you add them) — the tunnel only exists
    between peers that know each other.
-2. They open the official **PonyDriland** website.
+2. They open the official **Pony Driland** website.
 3. On the server selection screen they choose to connect to a **local server**.
 4. The browser asks for permission to access the local network / connect to `localhost` — they must
    **allow** it.
@@ -90,7 +90,7 @@ discover and type it manually.
 
 ## Why does the browser ask for permission?
 
-The PonyDriland website is served over **HTTPS**, and browsers require an explicit permission before
+The Pony Driland website is served over **HTTPS**, and browsers require an explicit permission before
 an `https://` page talks to a local address. This is expected and safe here: the request never leaves
 the visitor's computer, it goes to the Jami tunnel running on `localhost`.
 

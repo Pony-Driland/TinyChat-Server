@@ -2,7 +2,7 @@
 
 **TinyChat** is a lightweight roleplay/RPG room server with real-time messaging, dice, room-level
 permissions, a synchronized music player and AI support, designed for integration with the
-PonyDriland website.
+Pony Driland website.
 The project is currently in **beta**, but it is **fully available for free download and testing**.
 
 TinyChat aims to provide a simple, modular, and efficient environment for real-time interactions in
@@ -108,7 +108,7 @@ JSON file and import it back, with interactive room/chapter selection.
 
 📖 **[Full documentation →](docs/tiny-chat-archive-cli.md)**
 
-## 🌐 Hosting requirements (PonyDriland)
+## 🌐 Hosting requirements (Pony Driland)
 
 The website **ponydriland.com** will only accept connections from servers hosted using **HTTPS**.
 If your TinyChat server is running locally at home, you may use the built-in **proxy** as a
@@ -125,7 +125,7 @@ page (no Node.js required), run it on your own machine and share it through
 2. In Jami, open **Settings → Shared services** and share the local port `35421`.
 3. Enable **“Use local port as preferred ports on peers”** so your friends do not need to configure
    anything on their side.
-4. Your friends open the official **PonyDriland** website and connect to your server from there —
+4. Your friends open the official **Pony Driland** website and connect to your server from there —
    the browser will ask for permission to reach `http://localhost:35421`, which is expected.
 
 📖 **[Full Jami hosting guide →](docs/jami-hosting.md)**
