@@ -43,16 +43,16 @@ export function resolveShippedFile(devPath, fileName) {
  * @returns {string|string[]|false} The value expected by the `cors` package.
  */
 export function parseCorsOrigin(value) {
-  const list = String(value ?? "")
-    .split(",")
+  const list = String(value ?? '')
+    .split(',')
     .map((origin) => origin.trim())
     .filter((origin) => origin.length > 0);
 
   // No configuration at all keeps the historical behaviour.
-  if (list.length === 0) return "*";
+  if (list.length === 0) return '*';
 
   // A single `*` has to stay a string, otherwise the wildcard is lost.
-  if (list.indexOf("*") > -1) return "*";
+  if (list.indexOf('*') > -1) return '*';
 
   return list;
 }

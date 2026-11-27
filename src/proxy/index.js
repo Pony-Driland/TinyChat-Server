@@ -73,8 +73,6 @@ const startServer = async () => {
 
   /////////////////////////////////////////////////////////////////////
 
-  // Same reasoning as the chat server: the origin is configurable instead of
-  // being hardcoded to `*`.
   const proxy = new SocketIoProxyServer({
     cors: { origin: parseCorsOrigin(process.env.CORS_ORIGIN) },
   });
