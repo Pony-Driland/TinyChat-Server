@@ -54,6 +54,9 @@ export default async function startFiles() {
       _setIniConfig('LOAD_ALL_HISTORY', getIniBoolean(theCfg.server.load_all_history));
       _setIniConfig('PUBLIC_ROOMS', getIniBoolean(theCfg.server.public_rooms));
 
+      if (typeof theCfg.server.cors_origin === 'string')
+        _setIniConfig('CORS_ORIGIN', theCfg.server.cors_origin);
+
       if (typeof theCfg.proxy.address === 'string')
         _setIniConfig('PROXY_ADDRESS', theCfg.proxy.address);
       if (typeof theCfg.proxy.auth === 'string') _setIniConfig('PROXY_AUTH', theCfg.proxy.auth);

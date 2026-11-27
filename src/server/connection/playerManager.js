@@ -11,6 +11,7 @@ import {
   sendIncompleteDataInfo,
   userLoadIsRateLimited,
   userSession,
+  roomUsers,
   ROOM_ROLES,
 } from './values';
 
@@ -268,7 +269,10 @@ const playlistCriteria = (ownerId, roomId, filter, search = '') => {
 
   // The name is matched with `LIKE`, so the term is escaped and wrapped here.
   if (typeof search === 'string' && search.trim().length > 0) {
-    const term = search.trim().slice(0, MAX_PLAYLIST_NAME).replace(/[%_\\]/g, '\\$&');
+    const term = search
+      .trim()
+      .slice(0, MAX_PLAYLIST_NAME)
+      .replace(/[%_\\]/g, '\\$&');
     conditions.push({ column: 't.name', operator: 'LIKE', value: `%${term}%` });
   }
 
@@ -277,9 +281,7 @@ const playlistCriteria = (ownerId, roomId, filter, search = '') => {
   } else if (filter === 'room') {
     conditions.push({
       group: 'OR',
-      conditions: [
-        { column: 'j1.roomId', value: roomId },
-      ],
+      conditions: [{ column: 'j1.roomId', value: roomId }],
     });
   }
 
@@ -584,6 +586,11 @@ export default function playerManager(socket, emitTo, socketTo) {
     const room = await rooms.get(roomId);
     if (!room) return fn({ error: true, msg: 'Room not found.', code: 1 });
 
+    // The playlists belong to the room, so the account has to be inside it.
+    const rUsers = roomUsers.get(roomId);
+    if (!rUsers || !rUsers.get(userId))
+      return fn({ error: true, code: 2, msg: 'You are not in this room.' });
+
     // `global` and `room` are the only filters the database knows about;
     // anything else (including the `all` of the manager) means "no filter".
     const scope = filter === 'global' || filter === 'room' ? filter : null;
@@ -763,6 +770,11 @@ export default function playerManager(socket, emitTo, socketTo) {
 
     const rooms = db.getTable('rooms');
     if (!(await rooms.has(roomId))) return fn({ error: true, msg: 'Room not found.', code: 1 });
+
+    // The player of a room is only visible to the people inside it.
+    const rUsers = roomUsers.get(roomId);
+    if (!rUsers || !rUsers.get(userId))
+      return fn({ error: true, code: 2, msg: 'You are not in this room.' });
 
     fn({ success: true, player: await getPlayer(roomId), serverTime: Date.now() });
   });

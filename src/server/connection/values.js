@@ -25,6 +25,57 @@ export const roomUsers = new Map(); // Stores room users
 export const getHashString = (text) => createHash('sha256').update(text).digest('hex');
 
 /**
+ * Hashes a password with the configured maximum length.
+ *
+ * Every write and every comparison must go through this function. When the
+ * account is created with a truncated password but the login compares the full
+ * one (or the other way around), the account can never log in again.
+ *
+ * @param {unknown} password - Raw password.
+ * @returns {string} The hashed password.
+ */
+export const hashPassword = (password) => {
+  const maxSize = Number(getIniConfig('PASSWORD_SIZE'));
+  const value = typeof password === 'string' ? password : '';
+  return getHashString(
+    Number.isFinite(maxSize) && maxSize > 0 ? value.substring(0, maxSize) : value,
+  );
+};
+
+/**
+ * Normalizes an account id into its canonical stored form.
+ *
+ * The id is the primary key of the account, so every read and every write must
+ * go through this function. When the write path normalizes (lowercase, strip
+ * spaces, truncate) but the read path does not, a caller can pick an id that
+ * does not exist yet and still overwrite an existing account.
+ *
+ * @param {unknown} userId - Raw account id.
+ * @returns {string} The canonical id, or an empty string when invalid.
+ */
+export const normalizeUserId = (userId) => {
+  if (typeof userId !== 'string') return '';
+
+  const maxSize = Number(getIniConfig('USER_ID_SIZE'));
+  const limited = Number.isFinite(maxSize) && maxSize > 0 ? userId.substring(0, maxSize) : userId;
+
+  return limited.replace(/\s/g, '').toLowerCase();
+};
+
+/**
+ * Normalizes a room id into its canonical stored form.
+ *
+ * @param {unknown} roomId - Raw room id.
+ * @returns {string} The canonical id, or an empty string when invalid.
+ */
+export const normalizeRoomId = (roomId) => {
+  if (typeof roomId !== 'string') return '';
+
+  const maxSize = Number(getIniConfig('ROOM_ID_SIZE'));
+  return Number.isFinite(maxSize) && maxSize > 0 ? roomId.substring(0, maxSize) : roomId;
+};
+
+/**
  * Finds a user by id, ignoring the id casing.
  *
  * Accounts created before the lowercase migration can still be stored with
@@ -68,12 +119,11 @@ export function mapToArray(map) {
  * @returns {Promise<void>}
  */
 export const createAccount = async (userId, password, nickname) => {
-  const hashedPassword = getHashString(password.substring(0, getIniConfig('PASSWORD_SIZE')));
+  const hashedPassword = hashPassword(password);
   const users = db.getTable('users');
-  const normalizedId = userId
-    .substring(0, getIniConfig('USER_ID_SIZE'))
-    .replace(/ /g, '')
-    .toLowerCase();
+  const normalizedId = normalizeUserId(userId);
+
+  if (normalizedId.length < 1) throw new Error('Invalid user id.');
 
   await users.set(normalizedId, {
     password: hashedPassword,
@@ -102,9 +152,13 @@ export const normalizeRoomLanguage = (language) => {
 };
 
 export const createRoom = async (userId, roomId, password, title) => {
-  const hashedPassword = getHashString(password.substring(0, getIniConfig('PASSWORD_SIZE')));
+  const hashedPassword = hashPassword(password);
   const rooms = db.getTable('rooms');
-  await rooms.set(roomId.substring(0, getIniConfig('ROOM_ID_SIZE')), {
+  const normalizedId = normalizeRoomId(roomId);
+
+  if (normalizedId.length < 1) throw new Error('Invalid room id.');
+
+  await rooms.set(normalizedId, {
     password: hashedPassword,
     title: title.substring(0, getIniConfig('ROOM_TITLE_SIZE')),
     maxUsers: getIniConfig('MAX_USERS_PER_ROOM'),
@@ -264,6 +318,45 @@ export const listRoomPermissions = async (roomId) => {
   }));
 };
 
+/** Largest page a listing endpoint will ever return. */
+export const MAX_PAGE_SIZE = 100;
+
+/**
+ * Clamps a client supplied page size.
+ *
+ * Every listing endpoint used to accept any positive number, so a single
+ * request could ask the database for the whole table.
+ *
+ * @param {unknown} perPage - Requested page size.
+ * @param {number} [fallback=25] - Value used when the input is invalid.
+ * @returns {number} A page size between 1 and MAX_PAGE_SIZE.
+ */
+export const clampPageSize = (perPage, fallback = 25) => {
+  const value = Number(perPage);
+  if (!Number.isFinite(value) || value < 1) return fallback;
+  return Math.min(Math.floor(value), MAX_PAGE_SIZE);
+};
+
+/**
+ * Rejects a JSON payload that is too large to be stored.
+ *
+ * The room data and the RPG schema are opaque blobs, so the only defence
+ * against a single account filling the database is a size limit.
+ *
+ * @param {unknown} value - Value sent by the client.
+ * @param {number} [maxSize=65536] - Maximum serialized size, in bytes.
+ * @returns {boolean} True when the value is a JSON object within the limit.
+ */
+export const isRoomDataWithinLimit = (value, maxSize = 65536) => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+
+  try {
+    return Buffer.byteLength(JSON.stringify(value), 'utf8') <= maxSize;
+  } catch {
+    return false;
+  }
+};
+
 export const getRateLimit = () => ({
   size: {
     history: getIniConfig('HISTORY_SIZE'),
@@ -356,6 +449,9 @@ export const createRateLimit = (limitCountName = '', itemName = 'items', code = 
 };
 
 export const userIsRateLimited = createRateLimit('EVENT', 'events', 1);
+// Login is keyed by the connection address, so an unauthenticated attacker
+// cannot brute force a password by opening new sockets.
+export const loginIsRateLimited = createRateLimit('LOGIN_ATTEMPTS', 'login attempts', 8);
 export const roomUpdateIsRateLimited = createRateLimit('ROOM_UPDATES', 'room updates', 1);
 export const userMsgLoadIsRateLimited = createRateLimit('MESSAGES_LOAD', 'message loads', 4);
 export const userMsgDeleteIsRateLimited = createRateLimit('MESSAGES_DELETE', 'message deletes', 5);

@@ -31,6 +31,33 @@ export function resolveShippedFile(devPath, fileName) {
 }
 
 /**
+ * Parses the CORS origin configuration.
+ *
+ * The `cors` package only understands the wildcard when it receives the bare
+ * string `*`. An array is matched by exact comparison, so `['*']` matches no
+ * origin at all and the response is served without any `Access-Control-Allow-
+ * Origin` header. Returning the string here keeps `*` working while still
+ * allowing a comma separated allowlist.
+ *
+ * @param {unknown} value - Raw configuration value.
+ * @returns {string|string[]|false} The value expected by the `cors` package.
+ */
+export function parseCorsOrigin(value) {
+  const list = String(value ?? "")
+    .split(",")
+    .map((origin) => origin.trim())
+    .filter((origin) => origin.length > 0);
+
+  // No configuration at all keeps the historical behaviour.
+  if (list.length === 0) return "*";
+
+  // A single `*` has to stay a string, otherwise the wildcard is lost.
+  if (list.indexOf("*") > -1) return "*";
+
+  return list;
+}
+
+/**
  * @param {boolean|string} value
  * @returns {boolean}
  */

@@ -11,6 +11,7 @@ import playerManager from './connection/playerManager';
 import { getHashString, getIniConfig } from './connection/values';
 import db from './connection/sql';
 import { VERSION, getServerHelp } from '../api/help';
+import { parseCorsOrigin } from '../api/ini';
 
 const cliArgs = process.argv.slice(2);
 
@@ -60,7 +61,13 @@ startFiles().then(async (appStorage) => {
 
   // Socket IO
   const proxy = proxyAddress ? new SocketIoProxyClient(proxyAddress) : null;
-  const io = new Server({ cors: { origin: '*' } });
+
+  // The allowed origin used to be hardcoded to `*`, which lets any website
+  // drive the API of the server on behalf of a logged in visitor. It is now a
+  // configuration value, so a deployment can pin it to its own domain.
+  const io = new Server({
+    cors: { origin: parseCorsOrigin(getIniConfig('CORS_ORIGIN')) },
+  });
 
   // Proxy
   if (proxy) {

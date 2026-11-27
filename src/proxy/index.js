@@ -5,7 +5,7 @@ import SocketIoProxyServer from 'tiny-server-essentials/proxy/server';
 import { applyOverrides, ConfigOverrideError, parseOverrides } from '../api/configOverrides';
 import { VERSION, getProxyHelp } from '../api/help';
 
-import { createAppDirectory, ensureIniFile, getIniBoolean } from '../api/ini';
+import { createAppDirectory, ensureIniFile, getIniBoolean, parseCorsOrigin } from '../api/ini';
 import proxyTemplate from './proxy-config.ini';
 
 /**
@@ -73,8 +73,10 @@ const startServer = async () => {
 
   /////////////////////////////////////////////////////////////////////
 
+  // Same reasoning as the chat server: the origin is configurable instead of
+  // being hardcoded to `*`.
   const proxy = new SocketIoProxyServer({
-    cors: { origin: '*' },
+    cors: { origin: parseCorsOrigin(process.env.CORS_ORIGIN) },
   });
 
   proxy.auth = AUTH;

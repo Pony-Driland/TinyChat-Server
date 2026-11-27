@@ -23,6 +23,9 @@ import {
   revokeRoomPermission,
   listRoomPermissions,
   normalizeRoomLanguage,
+  normalizeRoomId,
+  clampPageSize,
+  isRoomDataWithinLimit,
   ROOM_ROLES,
 } from './values';
 
@@ -167,7 +170,7 @@ export default function roomManager(socket, emitTo, socketTo, socketEmit) {
         'public',
         'language',
       ],
-      perPage,
+      perPage: clampPageSize(perPage),
       page,
     });
 
@@ -313,12 +316,13 @@ export default function roomManager(socket, emitTo, socketTo, socketEmit) {
 
     list.sort((a, b) => a.userId.localeCompare(b.userId));
 
-    const totalPages = Math.max(1, Math.ceil(list.length / perPage));
-    const start = (page - 1) * perPage;
+    const pageSize = clampPageSize(perPage);
+    const totalPages = Math.max(1, Math.ceil(list.length / pageSize));
+    const start = (page - 1) * pageSize;
 
     fn({
       success: true,
-      users: list.slice(start, start + perPage),
+      users: list.slice(start, start + pageSize),
       page,
       totalPages,
     });
@@ -377,12 +381,13 @@ export default function roomManager(socket, emitTo, socketTo, socketEmit) {
         date: typeof item.date === 'number' ? item.date : null,
       }));
 
-    const totalPages = Math.max(1, Math.ceil(users.length / perPage));
-    const start = (page - 1) * perPage;
+    const pageSize = clampPageSize(perPage);
+    const totalPages = Math.max(1, Math.ceil(users.length / pageSize));
+    const start = (page - 1) * pageSize;
 
     fn({
       success: true,
-      users: users.slice(start, start + perPage),
+      users: users.slice(start, start + pageSize),
       page,
       totalPages,
     });
@@ -678,13 +683,21 @@ export default function roomManager(socket, emitTo, socketTo, socketEmit) {
       return fn({ error: true, msg: 'Room not found.', code: 1 });
     }
 
+    // The owner of the room is read from the database: `room` is the live
+    // user map, so it has no `ownerId`.
+    const rooms = db.getTable('rooms');
+    const roomRow = await rooms.get(roomId);
+    if (!roomRow) {
+      return fn({ error: true, msg: 'Room not found.', code: 1 });
+    }
+
     // Check if user is server owner or server mod
     const moderators = db.getTable('moderators');
     const roomModerators = db.getTable('roomModerators');
     if (
       yourId !== getIniConfig('OWNER_ID') &&
       !(await moderators.has(yourId)) &&
-      room.ownerId !== yourId &&
+      roomRow.ownerId !== yourId &&
       !(await roomModerators.has(roomId, yourId))
     ) {
       return fn({
@@ -706,7 +719,7 @@ export default function roomManager(socket, emitTo, socketTo, socketEmit) {
     const kickPromises = [];
     for (const userId of userIds) {
       const kickResult = { userId };
-      if (userId !== room.ownerId && userId !== getIniConfig('OWNER_ID')) {
+      if (userId !== roomRow.ownerId && userId !== getIniConfig('OWNER_ID')) {
         const theKick = leaveRoom(userSockets.get(userId), emitTo, roomId);
         theKick.then((kickStatus) => {
           if (!kickStatus.success) {
@@ -751,7 +764,12 @@ export default function roomManager(socket, emitTo, socketTo, socketEmit) {
     if (!userId) return accountNotDetected(fn); // Only logged-in users can use it
     if (userIsRateLimited(socket, fn)) return;
 
-    if (roomId.length < 1)
+    // The id is truncated when it is stored, so the existence check has to use
+    // the very same value. Otherwise a long id passes the check and then
+    // overwrites the room that already owns the truncated id.
+    const normalizedRoomId = normalizeRoomId(roomId);
+
+    if (normalizedRoomId.length < 1)
       return fn({
         error: true,
         code: 2,
@@ -760,7 +778,7 @@ export default function roomManager(socket, emitTo, socketTo, socketEmit) {
 
     // Check if the room exists
     const rooms = db.getTable('rooms');
-    let room = await rooms.get(roomId);
+    let room = await rooms.get(normalizedRoomId);
 
     if (!room) {
       // The owner configures the server, so the quota does not apply.
@@ -783,8 +801,8 @@ export default function roomManager(socket, emitTo, socketTo, socketEmit) {
         }
       }
 
-      await createRoom(userId, roomId, password, title);
-      return fn({ success: true });
+      await createRoom(userId, normalizedRoomId, password, title);
+      return fn({ success: true, roomId: normalizedRoomId });
     }
 
     // Room exists
@@ -1390,6 +1408,9 @@ export default function roomManager(socket, emitTo, socketTo, socketEmit) {
     if (typeof roomId !== 'string' || !isJsonObject(values) || typeof isPrivate !== 'boolean')
       return sendIncompleteDataInfo(fn);
 
+    // The blob is stored as is, so it is capped before it reaches the database.
+    if (!isRoomDataWithinLimit(values)) return sendIncompleteDataInfo(fn);
+
     // Get user
     const userId = userSession.getUserId(socket);
     if (!userId) return accountNotDetected(fn); // Only logged-in users can update settings
@@ -1436,6 +1457,9 @@ export default function roomManager(socket, emitTo, socketTo, socketEmit) {
     const { roomId, values } = data;
     // Validate values
     if (typeof roomId !== 'string' || !isJsonObject(values)) return sendIncompleteDataInfo(fn);
+
+    // The blob is stored as is, so it is capped before it reaches the database.
+    if (!isRoomDataWithinLimit(values)) return sendIncompleteDataInfo(fn);
 
     // Get user
     const userId = userSession.getUserId(socket);

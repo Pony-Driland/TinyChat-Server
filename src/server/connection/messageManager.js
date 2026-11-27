@@ -372,7 +372,7 @@ export default function messageManager(socket, socketTo, emitTo) {
     const newEvent = {
       roomId,
       id: messageId,
-      userId: msg,
+      userId: msg.userId,
       text: newText,
       date: msg.date,
       edited: msgDate,
@@ -970,6 +970,16 @@ export default function messageManager(socket, socketTo, emitTo) {
     if (!userId) return accountNotDetected(fn); // Only logged-in users can use dices
     if (userDiceIsRateLimited(socket, fn)) return;
 
+    // The dice are rolled on the server, so an unbounded list would let a
+    // client spend the whole event loop in a single request.
+    const maxDice = Number(getIniConfig('DICE_AMOUNT'));
+    if (Number.isFinite(maxDice) && maxDice > 0 && dice.length > maxDice)
+      return fn({
+        error: true,
+        code: 5,
+        msg: `You can roll at most ${maxDice} dice at once.`,
+      });
+
     // Check if the room exists
     const rUsers = roomUsers.get(roomId);
     if (!rUsers) {
@@ -1026,10 +1036,20 @@ export default function messageManager(socket, socketTo, emitTo) {
 
     // Roll dice with different number of sides
     // Iterate over each die and roll with its respective number of sides
+    const maxSides = Number(getIniConfig('DICE_SIDES'));
+
     for (const index in dice) {
       const sides = dice[index];
-      if (typeof sides !== 'number' || sides < 0)
+      if (typeof sides !== 'number' || !Number.isFinite(sides) || sides < 0)
         return fn({ error: true, code: 3, msg: 'Invalid dice of diff sides configuration' });
+
+      if (Number.isFinite(maxSides) && maxSides > 0 && sides > maxSides)
+        return fn({
+          error: true,
+          code: 6,
+          msg: `A die may have at most ${maxSides} sides.`,
+        });
+
       diceResults.push({ value: rollDice(sides, Number(index)), sides });
     }
 

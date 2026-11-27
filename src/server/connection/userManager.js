@@ -3,7 +3,6 @@ import {
   userIsRateLimited,
   userSession,
   createAccount,
-  getHashString,
   findUser,
   roomUsers,
   userSockets,
@@ -13,6 +12,10 @@ import {
   leaveRoom,
   getRateLimit,
   noDataInfo,
+  hashPassword,
+  normalizeUserId,
+  ownerOnly,
+  loginIsRateLimited,
 } from './values';
 
 /**
@@ -116,8 +119,7 @@ export default function userManager(socket, emitTo) {
 
     // Add into the staff list
     const moderators = db.getTable('moderators');
-    if (!(await moderators.has(userId)))
-      await moderators.set(userId, { date: Date.now() });
+    if (!(await moderators.has(userId))) await moderators.set(userId, { date: Date.now() });
 
     // Every room the account is in has to refresh the badge.
     broadcastStaff(userId, true);
@@ -279,8 +281,16 @@ export default function userManager(socket, emitTo) {
     const users = db.getTable('users');
     const user = await users.get(userId);
 
+    // The account may have been removed while the socket was still open.
+    if (!user)
+      return fn({
+        error: true,
+        code: 3,
+        msg: 'User not found.',
+      });
+
     // Validate password
-    if (user.password !== getHashString(oldPassword))
+    if (user.password !== hashPassword(oldPassword))
       return fn({
         error: true,
         code: 2,
@@ -295,9 +305,7 @@ export default function userManager(socket, emitTo) {
       });
 
     // Change password
-    await users.update(userId, {
-      password: getHashString(password.substring(0, getIniConfig('PASSWORD_SIZE'))),
-    });
+    await users.update(userId, { password: hashPassword(password) });
 
     // User unban successfully.
     fn({ success: true });
@@ -340,13 +348,6 @@ export default function userManager(socket, emitTo) {
     if (typeof userId !== 'string' || typeof password !== 'string' || typeof nickname !== 'string')
       return sendIncompleteDataInfo(fn);
 
-    if (userId !== userId.toLowerCase())
-      return fn({
-        error: true,
-        code: 5,
-        msg: 'User id must be lowercase.',
-      });
-
     // Check User
     if (userIsRateLimited(socket, fn, true)) return;
 
@@ -357,8 +358,27 @@ export default function userManager(socket, emitTo) {
       return fn({ error: true, code: 2, msg: 'Only the owner can create accounts.' });
     }
 
+    // The id is normalized exactly like the write path does it. Checking the
+    // raw id and storing the normalized one allowed an attacker to register
+    // "admin " (trailing space) and overwrite the "admin" account.
+    const normalizedId = normalizeUserId(userId);
+
+    if (normalizedId.length < 1)
+      return fn({
+        error: true,
+        code: 4,
+        msg: 'Your user id does not have the minimum number of characters.',
+      });
+
+    if (normalizedId !== userId)
+      return fn({
+        error: true,
+        code: 5,
+        msg: 'User id must be lowercase and must not contain spaces.',
+      });
+
     const users = db.getTable('users');
-    if (await users.has(userId)) {
+    if (await users.has(normalizedId)) {
       return fn({ error: true, code: 1, msg: 'User Id already exists.' });
     }
 
@@ -369,18 +389,11 @@ export default function userManager(socket, emitTo) {
         msg: 'Your password does not have the minimum number of characters.',
       });
 
-    if (userId.length < 1)
-      return fn({
-        error: true,
-        code: 4,
-        msg: 'Your user id does not have the minimum number of characters.',
-      });
-
     // Create Account
-    await createAccount(userId, password, nickname);
+    await createAccount(normalizedId, password, nickname);
 
     // User registered successfully.
-    fn({ userId, nickname });
+    fn({ userId: normalizedId, nickname });
   });
 
   socket.on('login', async (data, fn) => {
@@ -407,6 +420,10 @@ export default function userManager(socket, emitTo) {
       return fn({ error: true, msg: "You're already logged in!", code: 4 });
     }
 
+    // Throttle the attempts by connection address, so a password cannot be
+    // brute forced by reconnecting.
+    if (loginIsRateLimited(socket, fn, true)) return;
+
     // Validate user credentials
     const users = db.getTable('users');
 
@@ -423,7 +440,7 @@ export default function userManager(socket, emitTo) {
       return fn({ error: true, msg: 'The account is already in use.', code: 3 });
     }
 
-    const hashedPassword = getHashString(password);
+    const hashedPassword = hashPassword(password);
     if (user.password !== hashedPassword) {
       return fn({ error: true, msg: 'Invalid user credentials.', code: 1 });
     }
@@ -431,8 +448,7 @@ export default function userManager(socket, emitTo) {
     // The server owner and the staff can always log in, even when the server
     // reached the online account limit.
     const moderators = db.getTable('moderators');
-    const isStaff =
-      storedId === getIniConfig('OWNER_ID') || (await moderators.has(storedId));
+    const isStaff = storedId === getIniConfig('OWNER_ID') || (await moderators.has(storedId));
 
     if (!isStaff) {
       const maxOnline = getIniConfig('MAX_ONLINE_ACCOUNTS');
