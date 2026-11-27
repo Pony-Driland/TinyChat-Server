@@ -64,6 +64,8 @@ The `limits` section drives every validation and rate limit. The most relevant k
 | `ROOM_PROMPT` / `ROOM_SYSTEM_INSTRUCTION` / `ROOM_FIRST_DIALOGUE` | AI room fields |
 | `MODEL_ID_SIZE` | Model identifier size |
 | `HISTORY_SIZE` | Page size of `load-messages` |
+| `MAX_PAGE_SIZE` | Largest page a listing endpoint will ever return |
+| `ROOM_DATA_SIZE` | Maximum serialized size (bytes) of a room data / RPG schema blob |
 | `MAX_USERS_PER_ROOM` / `MAX_ONLINE_ACCOUNTS` | Capacity |
 | `MAX_ROOMS_PER_USER` | Rooms a single account may own |
 | `MAX_PLAYLISTS_PER_USER` / `MAX_TRACKS_PER_PLAYLIST` | Music player quotas |

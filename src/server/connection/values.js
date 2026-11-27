@@ -318,8 +318,20 @@ export const listRoomPermissions = async (roomId) => {
   }));
 };
 
-/** Largest page a listing endpoint will ever return. */
-export const MAX_PAGE_SIZE = 1000;
+/** Fallback for `limits.MAX_PAGE_SIZE` when the key is missing or invalid. */
+export const DEFAULT_MAX_PAGE_SIZE = 1000;
+
+/**
+ * Largest page a listing endpoint will ever return.
+ *
+ * Configured by `limits.MAX_PAGE_SIZE`.
+ *
+ * @returns {number} The configured page size cap.
+ */
+export const getMaxPageSize = () => {
+  const maxSize = Number(getIniConfig('MAX_PAGE_SIZE'));
+  return Number.isFinite(maxSize) && maxSize > 0 ? Math.floor(maxSize) : DEFAULT_MAX_PAGE_SIZE;
+};
 
 /**
  * Clamps a client supplied page size.
@@ -329,12 +341,27 @@ export const MAX_PAGE_SIZE = 1000;
  *
  * @param {unknown} perPage - Requested page size.
  * @param {number} [fallback=25] - Value used when the input is invalid.
- * @returns {number} A page size between 1 and MAX_PAGE_SIZE.
+ * @returns {number} A page size between 1 and `limits.MAX_PAGE_SIZE`.
  */
 export const clampPageSize = (perPage, fallback = 25) => {
   const value = Number(perPage);
   if (!Number.isFinite(value) || value < 1) return fallback;
-  return Math.min(Math.floor(value), MAX_PAGE_SIZE);
+  return Math.min(Math.floor(value), getMaxPageSize());
+};
+
+/** Fallback for `limits.ROOM_DATA_SIZE` when the key is missing or invalid. */
+export const DEFAULT_ROOM_DATA_SIZE = 65536;
+
+/**
+ * Largest serialized room data blob accepted by the server.
+ *
+ * Configured by `limits.ROOM_DATA_SIZE`.
+ *
+ * @returns {number} The configured limit, in bytes.
+ */
+export const getRoomDataSizeLimit = () => {
+  const maxSize = Number(getIniConfig('ROOM_DATA_SIZE'));
+  return Number.isFinite(maxSize) && maxSize > 0 ? Math.floor(maxSize) : DEFAULT_ROOM_DATA_SIZE;
 };
 
 /**
@@ -344,14 +371,16 @@ export const clampPageSize = (perPage, fallback = 25) => {
  * against a single account filling the database is a size limit.
  *
  * @param {unknown} value - Value sent by the client.
- * @param {number} [maxSize=65536] - Maximum serialized size, in bytes.
+ * @param {number} [maxSize] - Maximum serialized size, in bytes. Defaults to `limits.ROOM_DATA_SIZE`.
  * @returns {boolean} True when the value is a JSON object within the limit.
  */
-export const isRoomDataWithinLimit = (value, maxSize = 65536) => {
+export const isRoomDataWithinLimit = (value, maxSize) => {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
 
+  const limit = Number.isFinite(maxSize) && maxSize > 0 ? maxSize : getRoomDataSizeLimit();
+
   try {
-    return Buffer.byteLength(JSON.stringify(value), 'utf8') <= maxSize;
+    return Buffer.byteLength(JSON.stringify(value), 'utf8') <= limit;
   } catch {
     return false;
   }

@@ -596,6 +596,8 @@ Stores free-form JSON in `roomData` (public) or `privateRoomData` (owner only).
 { "roomId": "lobby", "isPrivate": false, "values": { "topic": "Gaming" } }
 ```
 
+The serialized payload is capped by `limits.ROOM_DATA_SIZE` (bytes, default `65536`).
+
 **Broadcast — `room-data-updated`** (public data only)
 
 ```json
@@ -618,6 +620,8 @@ Stores the RPG sheet schema of the room.
 ```json
 { "roomId": "lobby", "values": { "fields": [] } }
 ```
+
+The serialized payload is capped by `limits.ROOM_DATA_SIZE` (bytes, default `65536`).
 
 **Broadcast — `rpg-schema-updated`**
 
