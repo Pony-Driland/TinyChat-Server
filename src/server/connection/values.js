@@ -319,7 +319,7 @@ export const listRoomPermissions = async (roomId) => {
 };
 
 /** Largest page a listing endpoint will ever return. */
-export const MAX_PAGE_SIZE = 100;
+export const MAX_PAGE_SIZE = 1000;
 
 /**
  * Clamps a client supplied page size.
